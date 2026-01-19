@@ -1,0 +1,47 @@
+{
+        "nodes": [
+                { "id": "embedding", "type": "aiembeddingnode", "docks": {
+                        "extractor": [ "extractor" ],
+                        "parser": [ "parser" ],
+                        "chunker": [ "chunker" ],
+                        "embedder": [ "embeddingcache" ],
+                        "vectordb": [ "vectordb" ],
+                        "logger": [ "logger" ]
+                }, "inputs": {
+                        "mode": "replace",
+                        "debug": true,
+                        "debug_preview_len": 180
+                }}
+        ],
+        "resources": [
+                { "id": "extractor", "type": "iliasembeddingqueueextractoragentresource", "config": {
+                        "claim_limit": { "mode": "fixed", "value": 5 }
+                }},
+
+                { "id": "parser", "type": "structuredobjectparseragentresource" },
+
+                { "id": "chunker", "type": "iliaschunkeragentresource", "config": {
+                        "max_length": { "mode": "fixed", "value": 2000 },
+                        "min_length": { "mode": "fixed", "value": 500 },
+                        "overlap": { "mode": "fixed", "value": 50 }
+                }},
+
+                { "id": "embeddingcache", "type": "embeddingcacheagentresource", "docks": {
+                        "embedding": [ "embedder" ]
+                }, "config": {
+                        "model": { "mode": "fixed", "value": "text-embedding-3-large" }
+                }},
+		{ "id": "embedder", "type": "qualitusembeddingproxyagentresource", "config": {
+			"endpoint": { "mode": "config", "section": "qualitusembedding", "key": "endpoint" },
+			"apikey": { "mode": "config", "section": "qualitusembedding", "key": "apikey" },
+			"model": { "mode": "fixed", "value": "text-embedding-3-large" }
+		}},
+		{ "id": "vectordb", "type": "qualitusqdrantvectorstoreagentresource", "config": {
+			"endpoint": { "mode": "config", "section": "qualitusvectordb", "key": "endpoint" },
+			"apikey": { "mode": "config", "section": "qualitusvectordb", "key": "apikey" },
+			"create_payload_indexes": { "mode": "fixed", "value": true }
+		}},
+
+                { "id": "logger", "type": "loggerresource" }
+        ]
+}

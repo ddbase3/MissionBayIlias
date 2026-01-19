@@ -1,0 +1,58 @@
+glo
+- object_data
+- glossary
+- glossary_term
+
+wiki
+- object_data
+- il_wiki_data
+- il_wiki_imp_pages
+- il_wiki_page
+
+lm
+- object_data
+- lm_data
+
+frm
+- object_data
+- frm_data
+- frm_posts
+- frm_posts_tree
+- frm_threads
+
+blog
+- object_data
+- il_blog
+- il_blog_posting
+
+svy
+- object_data
+- many tabs, interesting?
+
+webr
+- object_data
+- webr_items
+- interesting? many similar links
+
+copa
+- object_data
+- copg_pc_def
+- copg_pobj_def
+
+htlm
+- object_data
+
+sahs
+- object_data
+- scorm more...
+
+mob
+- object_data
+- mob_data
+
+xvid
+- object_data
+- xvid more...
+
+mediacast (nicht richtig in object typen)
+- media_item
