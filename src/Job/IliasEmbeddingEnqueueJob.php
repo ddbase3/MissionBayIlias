@@ -46,7 +46,7 @@ final class IliasEmbeddingEnqueueJob implements IJob {
 	}
 
 	public function getPriority() {
-		return 1;
+		return 2;
 	}
 
 	public function go() {

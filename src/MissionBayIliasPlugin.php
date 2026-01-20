@@ -5,6 +5,9 @@ namespace MissionBayIlias;
 use Base3\Api\ICheck;
 use Base3\Api\IContainer;
 use Base3\Api\IPlugin;
+use Base3\Database\Api\IDatabase;
+use Base3\Logger\Api\ILogger;
+use Base3\Logger\ScopedDatabaseLogger\ScopedDatabaseLogger;
 use MissionBay\Api\IAgentRagPayloadNormalizer;
 use MissionBayIlias\Agent\IliasAgentRagPayloadNormalizer;
 
@@ -22,7 +25,8 @@ class MissionBayIliasPlugin implements IPlugin, ICheck {
 
         public function init() {
                 $this->container
-                        ->set(self::getName(), $this, IContainer::SHARED)
+			->set(self::getName(), $this, IContainer::SHARED)
+			->set(Ilogger::class, fn($c) => new ScopedDatabaseLogger($c->get(IDatabase::class)), IContainer::SHARED)
                         ->set(IAgentRagPayloadNormalizer::class, fn() => new IliasAgentRagPayloadNormalizer(), IContainer::SHARED);
         }
 
