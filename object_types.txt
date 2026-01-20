@@ -1,13 +1,27 @@
 glo
-- object_data
-- glossary
-- glossary_term
+- object_data (obj_id)
+- glossary_term (glo_id)
+
+blog
+- object_data (obj_id)
+- il_blog_posting (blog_id)
+- page_object (parent_id)
 
 wiki
-- object_data
-- il_wiki_data
-- il_wiki_imp_pages
-- il_wiki_page
+- object_data (obj_id)
+- il_wiki_data (id)
+- il_wiki_page (wiki_id)
+- page_object (parent_id)
+
+cat
+- object_data (obj_id)
+- page_object (parent_id)
+
+file
+- object_data (obj_id)
+- file_data (file_id)
+
+===
 
 lm
 - object_data
@@ -19,11 +33,6 @@ frm
 - frm_posts
 - frm_posts_tree
 - frm_threads
-
-blog
-- object_data
-- il_blog
-- il_blog_posting
 
 svy
 - object_data

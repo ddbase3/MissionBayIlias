@@ -18,6 +18,9 @@ use Base3\State\Api\IStateStore;
  * - source_uuid => source_obj_id (INT)
  * - source_version => source_version (DATETIME, based on object_data.last_update)
  * - collection_key is derived from object_data.type (char(4)) and normalized
+ *
+ * Filtering:
+ * - Only whitelisted ILIAS object types are enqueued (currently: wiki, glossar).
  */
 final class IliasEmbeddingEnqueueJob implements IJob {
 
@@ -32,6 +35,24 @@ final class IliasEmbeddingEnqueueJob implements IJob {
 	private const DEFAULT_LAST_CHANGED = '1970-01-01 00:00:00';
 	private const DEFAULT_LAST_RUN_AT = '1970-01-01 00:00:00';
 
+	/**
+	 * Allowed ILIAS object types (object_data.type).
+	 * Start small and expand later. Types are compared after trim().
+	 *
+	 * IMPORTANT:
+	 * The whitelist is considered immutable after the first productive run.
+	 * Changing it later will NOT automatically backfill newly added types.
+	 *
+	 * If the whitelist ever needs to change:
+	 * - Perform a full re-embed instead of adjusting incrementally.
+	 * - Reset state cursors (IStateStore) and embedding tables.
+	 * - Rebuild the vector index from scratch.
+	 */
+	private const TYPE_WHITELIST = [
+		'wiki' => true,
+		'glo' => true
+	];
+
 	public function __construct(
 		private readonly IDatabase $db,
 		private readonly IStateStore $state
@@ -42,7 +63,7 @@ final class IliasEmbeddingEnqueueJob implements IJob {
 	}
 
 	public function isActive() {
-		return false;
+		return true;
 	}
 
 	public function getPriority() {
@@ -81,6 +102,7 @@ final class IliasEmbeddingEnqueueJob implements IJob {
 			FROM object_data o
 			WHERE o.last_update IS NOT NULL
 				AND o.last_update > '" . $this->esc($lastChanged) . "'
+				AND o.type IN (" . $this->getWhitelistSqlIn() . ")
 			ORDER BY o.last_update ASC
 			LIMIT " . (int)$limit
 		);
@@ -95,12 +117,17 @@ final class IliasEmbeddingEnqueueJob implements IJob {
 		foreach ($rows as $row) {
 			$objId = (int)($row['obj_id'] ?? 0);
 			$lastUpdate = (string)($row['last_update'] ?? '');
+			$typeAlias = (string)($row['type_alias'] ?? '');
 
 			if ($objId <= 0 || $lastUpdate === '') {
 				continue;
 			}
 
-			$collectionKey = $this->normalizeCollectionKey((string)($row['type_alias'] ?? ''));
+			if (!$this->isWhitelistedType($typeAlias)) {
+				continue;
+			}
+
+			$collectionKey = $this->normalizeCollectionKey($typeAlias);
 
 			$this->upsertSeen($objId, $lastUpdate, $collectionKey);
 
@@ -131,6 +158,7 @@ final class IliasEmbeddingEnqueueJob implements IJob {
 			LEFT JOIN object_data o ON o.obj_id = s.source_obj_id
 			WHERE o.obj_id IS NULL
 				AND s.missing_since IS NULL
+				AND s.last_seen_collection_key IN (" . $this->getWhitelistSqlIn() . ")
 			LIMIT " . (int)$limit
 		);
 
@@ -146,6 +174,10 @@ final class IliasEmbeddingEnqueueJob implements IJob {
 			$collectionKey = $this->normalizeCollectionKey((string)($row['last_seen_collection_key'] ?? ''));
 
 			if ($objId <= 0 || $lastSeenVersion === '') {
+				continue;
+			}
+
+			if (!$this->isWhitelistedType($collectionKey)) {
 				continue;
 			}
 
@@ -347,6 +379,28 @@ final class IliasEmbeddingEnqueueJob implements IJob {
 	private function normalizeCollectionKey(string $key): string {
 		$key = trim($key);
 		return $key !== '' ? $key : self::DEFAULT_COLLECTION_KEY;
+	}
+
+	private function isWhitelistedType(string $typeAlias): bool {
+		$typeAlias = trim($typeAlias);
+		if ($typeAlias === '') {
+			return false;
+		}
+
+		return isset(self::TYPE_WHITELIST[$typeAlias]);
+	}
+
+	private function getWhitelistSqlIn(): string {
+		$parts = [];
+		foreach (array_keys(self::TYPE_WHITELIST) as $type) {
+			$parts[] = "'" . $this->esc((string)$type) . "'";
+		}
+
+		if (!$parts) {
+			return "''";
+		}
+
+		return implode(',', $parts);
 	}
 
 	/* ---------- DB helpers ---------- */
