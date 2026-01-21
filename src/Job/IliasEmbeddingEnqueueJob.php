@@ -5,57 +5,30 @@ namespace MissionBayIlias\Job;
 use Base3\Worker\Api\IJob;
 use Base3\Database\Api\IDatabase;
 use Base3\State\Api\IStateStore;
+use Base3\Api\IClassMap;
+use MissionBayIlias\Api\IContentProvider;
+use MissionBayIlias\Api\ContentCursor;
+use MissionBayIlias\Api\ContentUnit;
 
-/**
- * IliasEmbeddingEnqueueJob
- *
- * Worker A (enqueue):
- * - Scans ILIAS object_data incrementally (cursor: last_update)
- * - Enqueues upsert jobs and delete jobs
- * - Persists last run timestamps and cursors in IStateStore (no checkpoint table)
- *
- * Notes:
- * - source_uuid => source_obj_id (INT)
- * - source_version => source_version (DATETIME, based on object_data.last_update)
- * - collection_key is derived from object_data.type (char(4)) and normalized
- *
- * Filtering:
- * - Only whitelisted ILIAS object types are enqueued (currently: wiki, glossar).
- */
 final class IliasEmbeddingEnqueueJob implements IJob {
 
-	private const CHECKPOINT_NAME = 'object_data';
 	private const MIN_INTERVAL_SECONDS = 900;
 
 	private const CHANGED_BATCH = 5000;
 	private const DELETE_BATCH = 2000;
 
-	private const DEFAULT_COLLECTION_KEY = 'default';
-
-	private const DEFAULT_LAST_CHANGED = '1970-01-01 00:00:00';
 	private const DEFAULT_LAST_RUN_AT = '1970-01-01 00:00:00';
 
-	/**
-	 * Allowed ILIAS object types (object_data.type).
-	 * Start small and expand later. Types are compared after trim().
-	 *
-	 * IMPORTANT:
-	 * The whitelist is considered immutable after the first productive run.
-	 * Changing it later will NOT automatically backfill newly added types.
-	 *
-	 * If the whitelist ever needs to change:
-	 * - Perform a full re-embed instead of adjusting incrementally.
-	 * - Reset state cursors (IStateStore) and embedding tables.
-	 * - Rebuild the vector index from scratch.
-	 */
-	private const TYPE_WHITELIST = [
+	/** later config */
+	private const SOURCE_KIND_WHITELIST = [
 		'wiki' => true,
-		'glo' => true
+		'wiki_page' => true,
 	];
 
 	public function __construct(
 		private readonly IDatabase $db,
-		private readonly IStateStore $state
+		private readonly IStateStore $state,
+		private readonly IClassMap $classMap
 	) {}
 
 	public static function getName(): string {
@@ -78,266 +51,410 @@ final class IliasEmbeddingEnqueueJob implements IJob {
 
 		$this->ensureTables();
 
-		$checkpoint = $this->loadCheckpointFromState();
-		if (!$this->shouldRun($checkpoint)) {
-			return 'Skip (min interval not reached)';
+		$lastRunAt = (string)$this->state->get($this->stateKeyGlobal('last_run_at'), self::DEFAULT_LAST_RUN_AT);
+		if (!$this->shouldRun($lastRunAt)) {
+			return 'Skip';
 		}
 
-		$changed = $this->enqueueChanged(self::CHANGED_BATCH, (string)$checkpoint['last_changed']);
-		$deleted = $this->enqueueDeletes(self::DELETE_BATCH);
+		$providers = $this->getProviders();
 
-		$this->touchRunAt();
+		$changed = 0;
+		$deleted = 0;
+		$errors = 0;
 
-		return 'Enqueue done - changed: ' . $changed . ', deletes: ' . $deleted;
+		foreach ($providers as $provider) {
+			if (!$provider->isActive()) {
+				continue;
+			}
+
+			$kind = $provider->getSourceKind();
+			if (!$this->isWhitelisted($kind)) {
+				continue;
+			}
+
+			try {
+				$changed += $this->processProviderChanged($provider, self::CHANGED_BATCH);
+				$deleted += $this->processProviderDeletes($provider, self::DELETE_BATCH);
+			} catch (\Throwable $e) {
+				$errors++;
+				// intentionally keep going; failure isolation per provider
+			}
+		}
+
+		$this->state->set($this->stateKeyGlobal('last_run_at'), $this->now());
+
+		return "enqueue done - changed:$changed deleted:$deleted providers:" . count($providers) . " errors:$errors";
 	}
 
-	/* ---------- Enqueue logic ---------- */
+	/* ================= Providers ================= */
 
-	private function enqueueChanged(int $limit, string $lastChanged): int {
-		$rows = $this->queryAll(
-			"SELECT
-				o.obj_id,
-				o.last_update,
-				o.type AS type_alias
-			FROM object_data o
-			WHERE o.last_update IS NOT NULL
-				AND o.last_update > '" . $this->esc($lastChanged) . "'
-				AND o.type IN (" . $this->getWhitelistSqlIn() . ")
-			ORDER BY o.last_update ASC
-			LIMIT " . (int)$limit
-		);
+	/**
+	 * @return IContentProvider[]
+	 */
+	private function getProviders(): array {
+		$instances = $this->classMap->getInstances([
+			'interface' => IContentProvider::class
+		]);
 
-		if (!$rows) {
+		$providers = [];
+		foreach ($instances as $instance) {
+			if ($instance instanceof IContentProvider) {
+				$providers[] = $instance;
+			}
+		}
+
+		return $providers;
+	}
+
+	/* ================= Changed ================= */
+
+	private function processProviderChanged(IContentProvider $provider, int $limit): int {
+		$cursor = $this->loadCursor($provider);
+
+		$batch = $provider->fetchChanged($cursor, $limit);
+		$units = $batch->units;
+
+		if (!$units) {
+			$this->saveCursor($provider, $batch->nextCursor);
 			return 0;
 		}
 
-		$maxChanged = $lastChanged;
-		$processed = 0;
+		// Build deterministic content_ids and prefetch seen states in one query
+		$hexIds = [];
+		$unitByHex = [];
 
-		foreach ($rows as $row) {
-			$objId = (int)($row['obj_id'] ?? 0);
-			$lastUpdate = (string)($row['last_update'] ?? '');
-			$typeAlias = (string)($row['type_alias'] ?? '');
-
-			if ($objId <= 0 || $lastUpdate === '') {
+		foreach ($units as $u) {
+			if (!$u instanceof ContentUnit) {
 				continue;
 			}
 
-			if (!$this->isWhitelistedType($typeAlias)) {
+			if (!$this->isWhitelisted($u->sourceKind)) {
 				continue;
 			}
 
-			$collectionKey = $this->normalizeCollectionKey($typeAlias);
-
-			$this->upsertSeen($objId, $lastUpdate, $collectionKey);
-
-			// Supersede only pending upserts (do not touch running jobs)
-			$this->supersedePendingUpserts($objId, $collectionKey);
-
-			$this->insertUpsertJob($objId, $lastUpdate, $collectionKey);
-
-			if ($lastUpdate > $maxChanged) {
-				$maxChanged = $lastUpdate;
-			}
-
-			$processed++;
+			$hex = $this->contentIdHex($u->sourceSystem, $u->sourceKind, $u->sourceLocator);
+			$hexIds[$hex] = true;
+			$unitByHex[$hex] = $u;
 		}
 
-		$this->updateLastChanged($maxChanged);
-
-		return $processed;
-	}
-
-	private function enqueueDeletes(int $limit): int {
-		$rows = $this->queryAll(
-			"SELECT
-				s.source_obj_id,
-				s.last_seen_version,
-				s.last_seen_collection_key
-			FROM base3_embedding_seen s
-			LEFT JOIN object_data o ON o.obj_id = s.source_obj_id
-			WHERE o.obj_id IS NULL
-				AND s.missing_since IS NULL
-				AND s.last_seen_collection_key IN (" . $this->getWhitelistSqlIn() . ")
-			LIMIT " . (int)$limit
-		);
-
-		if (!$rows) {
+		if (!$hexIds) {
+			$this->saveCursor($provider, $batch->nextCursor);
 			return 0;
 		}
 
-		$processed = 0;
+		$seenMap = $this->loadSeenMap(array_keys($hexIds));
 
-		foreach ($rows as $row) {
-			$objId = (int)($row['source_obj_id'] ?? 0);
-			$lastSeenVersion = (string)($row['last_seen_version'] ?? '');
-			$collectionKey = $this->normalizeCollectionKey((string)($row['last_seen_collection_key'] ?? ''));
+		$cnt = 0;
 
-			if ($objId <= 0 || $lastSeenVersion === '') {
-				continue;
+		foreach ($unitByHex as $cidHex => $u) {
+			$version = $this->normalizeVersion($u->contentUpdatedAt);
+			$token = $u->contentVersionToken !== null && trim($u->contentVersionToken) !== '' ? trim($u->contentVersionToken) : null;
+
+			$seen = $seenMap[$cidHex] ?? null;
+
+			// HARD VERSION CHECK
+			// - if token is present and matches, require both version+token match
+			// - if token missing, fall back to version equality
+			if ($seen !== null) {
+				$seenVersion = (string)($seen['last_seen_version'] ?? '');
+				$seenToken = (string)($seen['last_seen_version_token'] ?? '');
+
+				if ($token !== null && $token !== '') {
+					if ($seenVersion === $version && $seenToken !== '' && $seenToken === $token) {
+						continue;
+					}
+				} else {
+					if ($seenVersion === $version) {
+						continue;
+					}
+				}
 			}
 
-			if (!$this->isWhitelistedType($collectionKey)) {
-				continue;
-			}
+			$this->upsertSeenFromUnit($cidHex, $u, $version, $token);
+			$this->supersedePendingUpserts($cidHex, $u->sourceKind);
+			$this->insertUpsertJob($cidHex, $u->sourceKind, $u->sourceLocator, $u->containerObjId, $version, $token);
 
-			$this->markMissing($objId);
-
-			$jobId = $this->insertDeleteJobAndGetId($objId, $lastSeenVersion, $collectionKey);
-			if ($jobId !== null) {
-				$this->setDeleteJobId($objId, $jobId);
-			}
-
-			$processed++;
+			$cnt++;
 		}
 
-		return $processed;
+		$this->saveCursor($provider, $batch->nextCursor);
+
+		return $cnt;
 	}
 
-	/* ---------- Supersede ---------- */
+	private function loadSeenMap(array $hexIds): array {
+		$chunks = array_chunk($hexIds, 800); // avoid giant IN() lists
+		$map = [];
 
-	private function supersedePendingUpserts(int $objId, string $collectionKey): void {
+		foreach ($chunks as $chunk) {
+			$in = $this->buildUnhexInList($chunk);
+
+			$rows = $this->queryAll(
+				"SELECT
+					HEX(content_id) cid,
+					last_seen_version,
+					last_seen_version_token,
+					missing_since,
+					deleted_at
+				 FROM base3_embedding_seen
+				 WHERE content_id IN ($in)"
+			);
+
+			foreach ($rows as $r) {
+				$cid = strtoupper((string)($r['cid'] ?? ''));
+				if ($cid !== '' && strlen($cid) === 32) {
+					$map[$cid] = $r;
+				}
+			}
+		}
+
+		return $map;
+	}
+
+	/* ================= Deletes ================= */
+
+	private function processProviderDeletes(IContentProvider $provider, int $limit): int {
+		$missingIds = $provider->fetchMissingSourceIntIds($limit);
+		if (!$missingIds) {
+			return 0;
+		}
+
+		$kind = $provider->getSourceKind();
+		if (!$this->isWhitelisted($kind)) {
+			return 0;
+		}
+
+		$ids = [];
+		foreach ($missingIds as $id) {
+			$id = (int)$id;
+			if ($id > 0) {
+				$ids[$id] = true;
+			}
+		}
+
+		if (!$ids) {
+			return 0;
+		}
+
+		$rows = $this->queryAll(
+			"SELECT
+				HEX(content_id) cid,
+				source_locator,
+				container_obj_id,
+				last_seen_version
+			 FROM base3_embedding_seen
+			 WHERE source_system = '" . $this->esc($provider->getSourceSystem()) . "'
+			   AND source_kind = '" . $this->esc($kind) . "'
+			   AND source_int_id IN (" . implode(',', array_map('intval', array_keys($ids))) . ")
+			   AND missing_since IS NULL
+			   AND deleted_at IS NULL
+			 LIMIT " . (int)$limit
+		);
+
+		$cnt = 0;
+
+		foreach ($rows as $r) {
+			$cid = strtoupper((string)($r['cid'] ?? ''));
+			if ($cid === '' || strlen($cid) !== 32) {
+				continue;
+			}
+
+			$containerObjId = isset($r['container_obj_id']) ? (int)$r['container_obj_id'] : null;
+			if ($containerObjId !== null && $containerObjId <= 0) {
+				$containerObjId = null;
+			}
+
+			$this->supersedePendingUpserts($cid, $kind);
+			$this->markMissing($cid);
+
+			$this->insertDeleteJob(
+				$cid,
+				$kind,
+				(string)($r['source_locator'] ?? ''),
+				$containerObjId,
+				(string)($r['last_seen_version'] ?? '')
+			);
+
+			$cnt++;
+		}
+
+		return $cnt;
+	}
+
+	/* ================= Seen / Jobs ================= */
+
+	private function supersedePendingUpserts(string $cidHex, string $kind): void {
 		$this->exec(
 			"UPDATE base3_embedding_job
-			SET state = 'superseded',
-				updated_at = NOW()
-			WHERE source_obj_id = " . (int)$objId . "
-				AND collection_key = '" . $this->esc($collectionKey) . "'
-				AND job_type = 'upsert'
-				AND state = 'pending'"
+			 SET state='superseded', updated_at=NOW()
+			 WHERE content_id = UNHEX('" . $this->esc($cidHex) . "')
+			   AND source_kind = '" . $this->esc($kind) . "'
+			   AND job_type='upsert'
+			   AND state='pending'"
 		);
 	}
 
-	/* ---------- Seen / Job helpers ---------- */
-
-	private function upsertSeen(int $objId, string $lastUpdate, string $collectionKey): void {
+	private function upsertSeenFromUnit(string $cidHex, ContentUnit $u, string $version, ?string $token): void {
 		$this->exec(
 			"INSERT INTO base3_embedding_seen
-				(source_obj_id, last_seen_version, last_seen_changed, last_seen_at, last_seen_collection_key, missing_since, delete_job_id, deleted_at)
-			VALUES
-				(" . (int)$objId . ", '" . $this->esc($lastUpdate) . "', '" . $this->esc($lastUpdate) . "', NOW(), '" . $this->esc($collectionKey) . "', NULL, NULL, NULL)
-			ON DUPLICATE KEY UPDATE
-				last_seen_version = VALUES(last_seen_version),
-				last_seen_changed = VALUES(last_seen_changed),
-				last_seen_at = NOW(),
-				last_seen_collection_key = VALUES(last_seen_collection_key),
-				missing_since = NULL,
-				delete_job_id = NULL,
-				deleted_at = NULL"
+					(content_id, source_system, source_kind, source_locator, container_obj_id, source_int_id,
+					 last_seen_version, last_seen_version_token, last_seen_at, missing_since, delete_job_id, deleted_at)
+			 VALUES
+					(UNHEX('" . $this->esc($cidHex) . "'),
+					 '" . $this->esc($u->sourceSystem) . "',
+					 '" . $this->esc($u->sourceKind) . "',
+					 '" . $this->esc($u->sourceLocator) . "',
+					 " . ($u->containerObjId !== null ? (int)$u->containerObjId : "NULL") . ",
+					 " . ($u->sourceIntId !== null ? (int)$u->sourceIntId : "NULL") . ",
+					 '" . $this->esc($version) . "',
+					 " . ($token !== null ? "'" . $this->esc($token) . "'" : "NULL") . ",
+					 NOW(),
+					 NULL,
+					 NULL,
+					 NULL)
+			 ON DUPLICATE KEY UPDATE
+					 source_system = VALUES(source_system),
+					 source_kind = VALUES(source_kind),
+					 source_locator = VALUES(source_locator),
+					 container_obj_id = VALUES(container_obj_id),
+					 source_int_id = VALUES(source_int_id),
+					 last_seen_version = VALUES(last_seen_version),
+					 last_seen_version_token = VALUES(last_seen_version_token),
+					 last_seen_at = NOW(),
+					 missing_since = NULL,
+					 delete_job_id = NULL,
+					 deleted_at = NULL"
 		);
 	}
 
-	private function insertUpsertJob(int $objId, string $lastUpdate, string $collectionKey): void {
+	private function insertUpsertJob(string $cidHex, string $kind, string $locator, ?int $containerObjId, string $version, ?string $token): void {
 		$this->exec(
 			"INSERT IGNORE INTO base3_embedding_job
-				(source_obj_id, source_version, collection_key, job_type, state, priority, attempts, locked_until, claim_token, claimed_at, created_at, updated_at, error_message)
-			VALUES
-				(" . (int)$objId . ", '" . $this->esc($lastUpdate) . "', '" . $this->esc($collectionKey) . "', 'upsert', 'pending', 1, 0, NULL, NULL, NULL, NOW(), NOW(), NULL)"
+					(content_id, source_kind, source_locator, container_obj_id,
+					 source_version, source_version_token,
+					 job_type, state, priority, attempts, locked_until, claim_token, claimed_at,
+					 created_at, updated_at, error_message)
+			 VALUES
+					(UNHEX('" . $this->esc($cidHex) . "'),
+					 '" . $this->esc($kind) . "',
+					 '" . $this->esc($locator) . "',
+					 " . ($containerObjId !== null ? (int)$containerObjId : "NULL") . ",
+					 '" . $this->esc($version) . "',
+					 " . ($token !== null ? "'" . $this->esc($token) . "'" : "NULL") . ",
+					 'upsert','pending',1,0,NULL,NULL,NULL,
+					 NOW(),NOW(),NULL)"
 		);
 	}
 
-	private function markMissing(int $objId): void {
-		$this->exec(
-			"UPDATE base3_embedding_seen
-			SET missing_since = NOW()
-			WHERE source_obj_id = " . (int)$objId . "
-				AND missing_since IS NULL"
-		);
-	}
-
-	private function insertDeleteJobAndGetId(int $objId, string $lastSeenVersion, string $collectionKey): ?int {
-		$this->exec(
-			"INSERT IGNORE INTO base3_embedding_job
-				(source_obj_id, source_version, collection_key, job_type, state, priority, attempts, locked_until, claim_token, claimed_at, created_at, updated_at, error_message)
-			VALUES
-				(" . (int)$objId . ", '" . $this->esc($lastSeenVersion) . "', '" . $this->esc($collectionKey) . "', 'delete', 'pending', 1, 0, NULL, NULL, NULL, NOW(), NOW(), NULL)"
-		);
-
-		$row = $this->queryOne(
-			"SELECT job_id
-			FROM base3_embedding_job
-			WHERE source_obj_id = " . (int)$objId . "
-				AND source_version = '" . $this->esc($lastSeenVersion) . "'
-				AND collection_key = '" . $this->esc($collectionKey) . "'
-				AND job_type = 'delete'
-			LIMIT 1"
-		);
-
-		return isset($row['job_id']) ? (int)$row['job_id'] : null;
-	}
-
-	private function setDeleteJobId(int $objId, int $jobId): void {
-		$this->exec(
-			"UPDATE base3_embedding_seen
-			SET delete_job_id = " . (int)$jobId . "
-			WHERE source_obj_id = " . (int)$objId
-		);
-	}
-
-	/* ---------- State (checkpoint replacement) ---------- */
-
-	private function loadCheckpointFromState(): array {
-		$lastChanged = (string)$this->state->get($this->stateKey('last_changed'), self::DEFAULT_LAST_CHANGED);
-		$lastRunAt = (string)$this->state->get($this->stateKey('last_run_at'), self::DEFAULT_LAST_RUN_AT);
-
-		$lastChanged = trim($lastChanged) !== '' ? $lastChanged : self::DEFAULT_LAST_CHANGED;
-		$lastRunAt = trim($lastRunAt) !== '' ? $lastRunAt : self::DEFAULT_LAST_RUN_AT;
-
-		return [
-			'last_changed' => $lastChanged,
-			'last_run_at' => $lastRunAt
-		];
-	}
-
-	private function touchRunAt(): void {
-		$this->state->set($this->stateKey('last_run_at'), $this->nowSqlString());
-	}
-
-	private function updateLastChanged(string $lastChanged): void {
-		$lastChanged = trim($lastChanged);
-		if ($lastChanged === '') {
-			return;
+	private function insertDeleteJob(string $cidHex, string $kind, string $locator, ?int $containerObjId, string $version): void {
+		if (trim($version) === '') {
+			$version = $this->now();
 		}
 
-		$this->state->set($this->stateKey('last_changed'), $lastChanged);
+		$this->exec(
+			"INSERT IGNORE INTO base3_embedding_job
+					(content_id, source_kind, source_locator, container_obj_id,
+					 source_version,
+					 job_type, state, priority, attempts, locked_until, claim_token, claimed_at,
+					 created_at, updated_at, error_message)
+			 VALUES
+					(UNHEX('" . $this->esc($cidHex) . "'),
+					 '" . $this->esc($kind) . "',
+					 '" . $this->esc($locator) . "',
+					 " . ($containerObjId !== null ? (int)$containerObjId : "NULL") . ",
+					 '" . $this->esc($version) . "',
+					 'delete','pending',1,0,NULL,NULL,NULL,
+					 NOW(),NOW(),NULL)"
+		);
 	}
 
-	private function stateKey(string $suffix): string {
-		return 'missionbay.ilias.embedding.' . self::CHECKPOINT_NAME . '.' . $suffix;
+	private function markMissing(string $cidHex): void {
+		$this->exec(
+			"UPDATE base3_embedding_seen
+			 SET missing_since = NOW()
+			 WHERE content_id = UNHEX('" . $this->esc($cidHex) . "')
+			   AND missing_since IS NULL"
+		);
 	}
 
-	private function nowSqlString(): string {
+	/* ================= Cursor / State ================= */
+
+	private function loadCursor(IContentProvider $provider): ContentCursor {
+		$raw = (string)$this->state->get($this->stateKeyProvider($provider, 'cursor'), '');
+		return ContentCursor::fromString($raw);
+	}
+
+	private function saveCursor(IContentProvider $provider, ContentCursor $cursor): void {
+		$this->state->set($this->stateKeyProvider($provider, 'cursor'), $cursor->toString());
+	}
+
+	private function stateKeyGlobal(string $s): string {
+		return 'missionbay.embedding.enqueue.' . $s;
+	}
+
+	private function stateKeyProvider(IContentProvider $p, string $s): string {
+		return 'missionbay.embedding.enqueue.provider.' . $p::getName() . '.' . $p->getSourceSystem() . '.' . $p->getSourceKind() . '.' . $s;
+	}
+
+	private function shouldRun(string $raw): bool {
+		$ts = strtotime($raw);
+		return $ts === false || (time() - $ts) >= self::MIN_INTERVAL_SECONDS;
+	}
+
+	private function now(): string {
 		return date('Y-m-d H:i:s');
 	}
 
-	private function shouldRun(array $checkpoint): bool {
-		$lastRunRaw = (string)($checkpoint['last_run_at'] ?? '');
+	/* ================= Whitelist ================= */
 
-		if ($lastRunRaw === '' || $lastRunRaw === self::DEFAULT_LAST_RUN_AT) {
-			return true;
-		}
-
-		$lastRunAt = strtotime($lastRunRaw);
-		if ($lastRunAt === false) {
-			return true;
-		}
-
-		return (time() - $lastRunAt) >= self::MIN_INTERVAL_SECONDS;
+	private function isWhitelisted(string $kind): bool {
+		return isset(self::SOURCE_KIND_WHITELIST[$kind]) && self::SOURCE_KIND_WHITELIST[$kind] === true;
 	}
 
-	/* ---------- Schema ---------- */
+	/* ================= Schema ================= */
 
 	private function ensureTables(): void {
-		$this->exec($this->getJobTableSql());
 		$this->exec($this->getSeenTableSql());
+		$this->exec($this->getJobTableSql());
+	}
+
+	private function getSeenTableSql(): string {
+		return "CREATE TABLE IF NOT EXISTS base3_embedding_seen (
+			content_id BINARY(16) NOT NULL,
+			source_system VARCHAR(32) NOT NULL,
+			source_kind VARCHAR(32) NOT NULL,
+			source_locator VARCHAR(255) NOT NULL,
+			container_obj_id INT NULL,
+			source_int_id INT NULL,
+
+			last_seen_version DATETIME NOT NULL,
+			last_seen_version_token VARCHAR(64) NULL,
+			last_seen_at DATETIME NOT NULL,
+
+			missing_since DATETIME NULL,
+			delete_job_id BIGINT NULL,
+			deleted_at DATETIME NULL,
+
+			PRIMARY KEY (content_id),
+			UNIQUE KEY uq_source (source_system, source_kind, source_locator),
+			KEY ix_kind (source_kind),
+			KEY ix_source_int (source_kind, source_int_id),
+			KEY ix_container (container_obj_id),
+			KEY ix_missing (missing_since),
+			KEY ix_delete_job (delete_job_id),
+			KEY ix_last_seen (last_seen_at)
+		) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci";
 	}
 
 	private function getJobTableSql(): string {
 		return "CREATE TABLE IF NOT EXISTS base3_embedding_job (
 			job_id BIGINT NOT NULL AUTO_INCREMENT,
-			source_obj_id INT NOT NULL,
+			content_id BINARY(16) NOT NULL,
+			source_kind VARCHAR(32) NOT NULL,
+			source_locator VARCHAR(255) NULL,
+			container_obj_id INT NULL,
 			source_version DATETIME NULL,
-			collection_key VARCHAR(64) NOT NULL,
+			source_version_token VARCHAR(64) NULL,
 			job_type ENUM('upsert','delete') NOT NULL,
 			state ENUM('pending','running','done','error','superseded') NOT NULL DEFAULT 'pending',
 			priority TINYINT NOT NULL DEFAULT 1,
@@ -349,61 +466,39 @@ final class IliasEmbeddingEnqueueJob implements IJob {
 			updated_at DATETIME NOT NULL,
 			error_message TEXT NULL,
 			PRIMARY KEY (job_id),
-			UNIQUE KEY uq_job (source_obj_id, source_version, collection_key, job_type),
+			UNIQUE KEY uq_job (content_id, source_version, job_type),
 			KEY ix_claim (state, priority, locked_until, updated_at),
 			KEY ix_claim_token (claim_token),
-			KEY ix_source (source_obj_id, job_type),
-			KEY ix_collection (collection_key)
+			KEY ix_kind (source_kind),
+			KEY ix_content (content_id, job_type),
+			KEY ix_container (container_obj_id)
 		) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci";
 	}
 
-	private function getSeenTableSql(): string {
-		return "CREATE TABLE IF NOT EXISTS base3_embedding_seen (
-			source_obj_id INT NOT NULL,
-			last_seen_version DATETIME NOT NULL,
-			last_seen_changed DATETIME NOT NULL,
-			last_seen_at DATETIME NOT NULL,
-			last_seen_collection_key VARCHAR(64) NOT NULL,
-			missing_since DATETIME NULL,
-			delete_job_id BIGINT NULL,
-			deleted_at DATETIME NULL,
-			PRIMARY KEY (source_obj_id),
-			KEY ix_missing (missing_since),
-			KEY ix_delete_job (delete_job_id),
-			KEY ix_seen_collection (last_seen_collection_key)
-		) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci";
+	/* ================= Helpers ================= */
+
+	private function normalizeVersion(?string $raw): string {
+		$raw = trim((string)$raw);
+		return $raw !== '' ? $raw : $this->now();
 	}
 
-	/* ---------- Helpers ---------- */
-
-	private function normalizeCollectionKey(string $key): string {
-		$key = trim($key);
-		return $key !== '' ? $key : self::DEFAULT_COLLECTION_KEY;
+	private function contentIdHex(string $sourceSystem, string $sourceKind, string $sourceLocator): string {
+		// Deterministic 16 bytes id (32 hex chars) from canonical identity
+		$base = $sourceSystem . '|' . $sourceKind . '|' . $sourceLocator;
+		return strtoupper(md5($base));
 	}
 
-	private function isWhitelistedType(string $typeAlias): bool {
-		$typeAlias = trim($typeAlias);
-		if ($typeAlias === '') {
-			return false;
-		}
-
-		return isset(self::TYPE_WHITELIST[$typeAlias]);
-	}
-
-	private function getWhitelistSqlIn(): string {
+	private function buildUnhexInList(array $hexIds): string {
 		$parts = [];
-		foreach (array_keys(self::TYPE_WHITELIST) as $type) {
-			$parts[] = "'" . $this->esc((string)$type) . "'";
+		foreach ($hexIds as $hex) {
+			$hex = strtoupper(trim((string)$hex));
+			if ($hex !== '' && strlen($hex) === 32 && ctype_xdigit($hex)) {
+				$parts[] = "UNHEX('" . $this->esc($hex) . "')";
+			}
 		}
 
-		if (!$parts) {
-			return "''";
-		}
-
-		return implode(',', $parts);
+		return $parts ? implode(',', $parts) : "UNHEX('00000000000000000000000000000000')";
 	}
-
-	/* ---------- DB helpers ---------- */
 
 	private function exec(string $sql): void {
 		$this->db->nonQuery($sql);
@@ -413,11 +508,7 @@ final class IliasEmbeddingEnqueueJob implements IJob {
 		return $this->db->multiQuery($sql) ?: [];
 	}
 
-	private function queryOne(string $sql): ?array {
-		return $this->db->singleQuery($sql);
-	}
-
-	private function esc(string $value): string {
-		return (string)$this->db->escape($value);
+	private function esc(string $v): string {
+		return (string)$this->db->escape($v);
 	}
 }

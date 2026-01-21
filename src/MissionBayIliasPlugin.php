@@ -9,6 +9,8 @@ use Base3\Database\Api\IDatabase;
 use Base3\Logger\Api\ILogger;
 use Base3\Logger\ScopedDatabaseLogger\ScopedDatabaseLogger;
 use MissionBay\Api\IAgentRagPayloadNormalizer;
+use MissionBayIlias\Api\IObjectTreeResolver;
+use MissionBayIlias\Service\IliasObjectTreeResolver;
 use MissionBayIlias\Agent\IliasAgentRagPayloadNormalizer;
 
 class MissionBayIliasPlugin implements IPlugin, ICheck {
@@ -27,7 +29,8 @@ class MissionBayIliasPlugin implements IPlugin, ICheck {
                 $this->container
 			->set(self::getName(), $this, IContainer::SHARED)
 			->set(Ilogger::class, fn($c) => new ScopedDatabaseLogger($c->get(IDatabase::class)), IContainer::SHARED)
-                        ->set(IAgentRagPayloadNormalizer::class, fn() => new IliasAgentRagPayloadNormalizer(), IContainer::SHARED);
+			->set(IAgentRagPayloadNormalizer::class, fn() => new IliasAgentRagPayloadNormalizer(), IContainer::SHARED)
+			->set(IObjectTreeResolver::class, fn($c) => new IliasObjectTreeResolver($c->get(IDatabase::class)), IContainer::SHARED);
         }
 
         // Implementation of ICheck
