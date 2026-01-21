@@ -5,7 +5,7 @@
                         "parser": [ "parser" ],
                         "chunker": [ "chunker" ],
                         "embedder": [ "embeddingcache" ],
-                        "vectordb": [ "debugvectordb" ],
+                        "vectordb": [ "vectordb" ],
                         "logger": [ "logger" ]
                 }, "inputs": {
                         "mode": "replace",
