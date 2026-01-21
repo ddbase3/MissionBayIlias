@@ -5,7 +5,7 @@
                         "parser": [ "parser" ],
                         "chunker": [ "chunker" ],
                         "embedder": [ "embeddingcache" ],
-                        "vectordb": [ "vectordb" ],
+                        "vectordb": [ "debugvectordb" ],
                         "logger": [ "logger" ]
                 }, "inputs": {
                         "mode": "replace",
@@ -36,10 +36,17 @@
 			"apikey": { "mode": "config", "section": "qualitusembedding", "key": "apikey" },
 			"model": { "mode": "fixed", "value": "text-embedding-3-large" }
 		}},
+
 		{ "id": "vectordb", "type": "qualitusqdrantvectorstoreagentresource", "config": {
 			"endpoint": { "mode": "config", "section": "qualitusvectordb", "key": "endpoint" },
 			"apikey": { "mode": "config", "section": "qualitusvectordb", "key": "apikey" },
 			"create_payload_indexes": { "mode": "fixed", "value": true }
+		}},
+		{ "id": "debugvectordb", "type": "consolevectorstoreagentresource", "config": {
+			"vector_preview_dims": { "mode": "fixed", "value": 16 },
+			"vector_preview_decimals": { "mode": "fixed", "value": 4 },
+			"payload_preview_bytes": { "mode": "fixed", "value": 1200 },
+			"text_preview_chars": { "mode": "fixed", "value": 240 }
 		}},
 
                 { "id": "logger", "type": "loggerresource" }
