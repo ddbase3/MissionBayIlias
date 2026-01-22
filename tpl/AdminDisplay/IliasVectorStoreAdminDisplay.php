@@ -4,17 +4,57 @@
 	<div class="vs-meta">
 		<div><strong>Resource:</strong> <span class="mono"><?php echo htmlspecialchars((string)$this->_['resourceName'], ENT_QUOTES); ?></span></div>
 		<div><strong>CollectionKey:</strong> <span class="mono"><?php echo htmlspecialchars((string)$this->_['collectionKey'], ENT_QUOTES); ?></span></div>
+		<div><strong>Letztes Update:</strong> <span id="vs-lastupdate" class="mono">–</span></div>
 	</div>
-
-	<div id="vs-loading">Bitte warten…</div>
 
 	<div class="vs-buttons">
 		<button type="button" onclick="vsAction('create')">Collection erstellen</button>
 		<button type="button" onclick="if (confirm('Collection wirklich löschen?')) vsAction('delete');">Collection löschen</button>
 		<button type="button" onclick="vsAction('info')">Info abrufen</button>
+		<button type="button" onclick="vsAction('stats')">Status anzeigen</button>
+
+		<label id="vs-loading">Bitte warten…</label>
 	</div>
 
-	<div id="vs-output">Bereit.</div>
+	<div class="vs-grid" id="vs-grid" style="display:none">
+		<div class="vs-card">
+			<div class="vs-card-head">
+				<div class="vs-title">Health</div>
+				<div class="vs-badge" id="vs-badge-health">–</div>
+			</div>
+			<div class="vs-kpis" id="vs-kpis-health">–</div>
+			<div class="vs-foot" id="vs-foot-health">–</div>
+		</div>
+
+		<div class="vs-card">
+			<div class="vs-card-head">
+				<div class="vs-title">Datenbestand</div>
+				<div class="vs-badge" id="vs-badge-size">–</div>
+			</div>
+			<div class="vs-kpis" id="vs-kpis-size">–</div>
+			<div class="vs-foot" id="vs-foot-size">–</div>
+		</div>
+
+		<div class="vs-card">
+			<div class="vs-card-head">
+				<div class="vs-title">Schema & Payload</div>
+				<div class="vs-badge" id="vs-badge-schema">–</div>
+			</div>
+			<div class="vs-kpis" id="vs-kpis-schema">–</div>
+			<div class="vs-foot" id="vs-foot-schema">–</div>
+		</div>
+
+		<div class="vs-card">
+			<div class="vs-card-head">
+				<div class="vs-title">Index & Config</div>
+				<div class="vs-badge" id="vs-badge-config">–</div>
+			</div>
+			<div class="vs-kpis" id="vs-kpis-config">–</div>
+			<div class="vs-foot" id="vs-foot-config">–</div>
+		</div>
+	</div>
+
+	<div id="vs-output" style="display:none">Bereit.</div>
 </div>
 
 <style>
@@ -38,6 +78,9 @@
 	margin-bottom: 12px;
 	font-size: 13px;
 	color: #555;
+	display: flex;
+	gap: 18px;
+	flex-wrap: wrap;
 }
 
 .mono {
@@ -48,6 +91,8 @@
 	display: flex;
 	gap: 10px;
 	margin-bottom: 15px;
+	align-items: center;
+	flex-wrap: wrap;
 }
 
 .vs-buttons button {
@@ -68,12 +113,95 @@
 
 #vs-loading {
 	display: none;
-	margin-bottom: 10px;
 	color: #666;
+	display: flex;
+	align-items: center;
 	font-style: italic;
 	font-size: 13px;
+	gap: 6px;
+	user-select: none;
 }
 
+/* Cards */
+.vs-grid {
+	display: grid;
+	grid-template-columns: repeat(2, minmax(0, 1fr));
+	gap: 12px;
+	margin-bottom: 12px;
+}
+
+@media (max-width: 900px) {
+	.vs-grid {
+		grid-template-columns: 1fr;
+	}
+}
+
+.vs-card {
+	border: 1px solid #ddd;
+	border-radius: 6px;
+	background: #fff;
+	padding: 12px;
+	min-height: 150px;
+	display: flex;
+	flex-direction: column;
+	gap: 10px;
+}
+
+.vs-card-head {
+	display: flex;
+	justify-content: space-between;
+	align-items: center;
+	gap: 10px;
+}
+
+.vs-title {
+	font-weight: bold;
+	font-size: 14px;
+}
+
+.vs-badge {
+	font-size: 12px;
+	padding: 3px 8px;
+	border-radius: 999px;
+	border: 1px solid #ccc;
+	background: #f6f6f6;
+	color: #333;
+	white-space: nowrap;
+}
+
+.vs-badge.ok {
+	border-color: #8d8;
+	background: #f6fff6;
+	color: #2d6a2d;
+}
+
+.vs-badge.warn {
+	border-color: #e3c07a;
+	background: #fffaf0;
+	color: #8a5a00;
+}
+
+.vs-badge.err {
+	border-color: #d88;
+	background: #fff5f5;
+	color: #a33;
+}
+
+.vs-kpis {
+	font-family: Consolas, monospace;
+	font-size: 13px;
+	white-space: pre-wrap;
+	line-height: 1.35;
+	color: #222;
+}
+
+.vs-foot {
+	font-size: 12px;
+	color: #666;
+	margin-top: auto;
+}
+
+/* legacy output (hidden by default) */
 #vs-output {
 	background: #fff;
 	border: 1px solid #ddd;
@@ -104,7 +232,7 @@
 	const VS_ENDPOINT = <?php echo json_encode((string)$this->_['endpoint']); ?>;
 
 	function vsSetLoading(state) {
-		document.getElementById("vs-loading").style.display = state ? "block" : "none";
+		document.getElementById("vs-loading").style.display = state ? "flex" : "none";
 	}
 
 	function vsPrint(msg, type = null) {
@@ -117,9 +245,67 @@
 		box.textContent = msg;
 	}
 
+	function vsSetBadge(id, state, label) {
+		const el = document.getElementById(id);
+		el.className = "vs-badge";
+		if (state === "ok") el.classList.add("ok");
+		if (state === "warn") el.classList.add("warn");
+		if (state === "err") el.classList.add("err");
+		el.textContent = label;
+	}
+
+	function vsFmt(n) {
+		if (n === null || typeof n === "undefined") return "–";
+		return String(n);
+	}
+
+	function vsRender(stats) {
+		document.getElementById("vs-grid").style.display = "grid";
+		document.getElementById("vs-lastupdate").textContent = stats.timestamp || "–";
+
+		// 1) Health
+		vsSetBadge("vs-badge-health", stats.badges.health.state, stats.badges.health.label);
+		document.getElementById("vs-kpis-health").textContent =
+			"status: " + vsFmt(stats.health.status) + "\n" +
+			"optimizer: " + vsFmt(stats.health.optimizer_status) + "\n" +
+			"segments: " + vsFmt(stats.health.segments_count) + "\n" +
+			"info_time: " + vsFmt(stats.health.info_time_ms) + " ms";
+		document.getElementById("vs-foot-health").textContent =
+			stats.health.note || "–";
+
+		// 2) Datenbestand
+		vsSetBadge("vs-badge-size", stats.badges.size.state, stats.badges.size.label);
+		document.getElementById("vs-kpis-size").textContent =
+			"points: " + vsFmt(stats.size.points_count) + "\n" +
+			"indexed_vectors: " + vsFmt(stats.size.indexed_vectors_count) + "\n" +
+			"payload_on_disk: " + vsFmt(stats.size.on_disk_payload) + "\n" +
+			"shards: " + vsFmt(stats.size.shard_number) + "  repl: " + vsFmt(stats.size.replication_factor);
+		document.getElementById("vs-foot-size").textContent =
+			"collection: " + vsFmt(stats.size.collection);
+
+		// 3) Schema & Payload
+		vsSetBadge("vs-badge-schema", stats.badges.schema.state, stats.badges.schema.label);
+		document.getElementById("vs-kpis-schema").textContent =
+			"fields: " + vsFmt(stats.schema.field_count) + "\n" +
+			"fields with 0 points: " + vsFmt(stats.schema.zero_point_fields_count) + "\n" +
+			"expected missing: " + vsFmt(stats.schema.expected_missing_count) + "\n" +
+			"top keys: " + vsFmt(stats.schema.top_keys_preview);
+		document.getElementById("vs-foot-schema").textContent =
+			stats.schema.note || "–";
+
+		// 4) Index & Config
+		vsSetBadge("vs-badge-config", stats.badges.config.state, stats.badges.config.label);
+		document.getElementById("vs-kpis-config").textContent =
+			"vector: " + vsFmt(stats.config.vector_size) + " / " + vsFmt(stats.config.distance) + "\n" +
+			"hnsw m: " + vsFmt(stats.config.hnsw_m) + "  ef: " + vsFmt(stats.config.hnsw_ef_construct) + "\n" +
+			"full_scan_threshold: " + vsFmt(stats.config.full_scan_threshold) + "\n" +
+			"strict_mode: " + vsFmt(stats.config.strict_mode_enabled);
+		document.getElementById("vs-foot-config").textContent =
+			stats.config.note || "–";
+	}
+
 	async function vsAction(action) {
 		vsSetLoading(true);
-		vsPrint("Rufe " + action + "…");
 
 		try {
 			const response = await fetch(VS_ENDPOINT + encodeURIComponent(action), {
@@ -133,16 +319,24 @@
 			try {
 				json = JSON.parse(text);
 			} catch (e) {
-				vsPrint("Ungültige Antwort:\n\n" + text, "error");
 				vsSetLoading(false);
 				return;
 			}
 
 			if (json.status === "error") {
+				// für Debug kann man vs-output temporär anzeigen
 				vsPrint("Fehler:\n" + JSON.stringify(json, null, 2), "error");
-			} else {
-				vsPrint(JSON.stringify(json, null, 2), "success");
+				vsSetLoading(false);
+				return;
 			}
+
+			// stats -> render cards
+			if (action === "stats" && json.data && json.data.stats) {
+				vsRender(json.data.stats);
+			}
+
+			// info/create/delete weiterhin möglich, aber output bleibt standardmäßig hidden
+			vsPrint(JSON.stringify(json, null, 2), "success");
 
 		} catch (err) {
 			vsPrint("Anfrage fehlgeschlagen:\n" + err, "error");
@@ -150,4 +344,7 @@
 
 		vsSetLoading(false);
 	}
+
+	// init: direkt Status laden
+	vsAction("stats");
 </script>
