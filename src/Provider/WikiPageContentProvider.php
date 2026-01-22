@@ -6,6 +6,7 @@ use MissionBayIlias\Api\IContentProvider;
 use MissionBayIlias\Api\ContentCursor;
 use MissionBayIlias\Api\ContentBatch;
 use MissionBayIlias\Api\ContentUnit;
+use MissionBayIlias\Api\IObjectTreeResolver;
 use Base3\Database\Api\IDatabase;
 
 final class WikiPageContentProvider implements IContentProvider {
@@ -16,7 +17,8 @@ final class WikiPageContentProvider implements IContentProvider {
 	private const PARENT_TYPE = 'wpg';
 
 	public function __construct(
-		private readonly IDatabase $db
+		private readonly IDatabase $db,
+		private readonly IObjectTreeResolver $objectTreeResolver
 	) {}
 
 	public static function getName(): string {
@@ -271,6 +273,17 @@ final class WikiPageContentProvider implements IContentProvider {
 		}
 
 		return array_keys($roleIds);
+	}
+
+	public function getDirectLink(string $sourceLocator, ?int $containerObjId, ?int $sourceIntId): string {
+		if ($containerObjId === null || $sourceIntId === null) return '';
+
+		$refIds = $this->objectTreeResolver->getRefIdsByObjId($containerObjId);
+		if ($refIds === []) return '';
+
+		$refId = $refIds[0];
+
+		return 'goto.php/wiki/wpage_' . $sourceIntId . '_' . $refId;
 	}
 
 	/* ---------- Helpers ---------- */

@@ -61,4 +61,14 @@ interface IContentProvider extends IBase {
 	 * @return int[] role_ids
 	 */
 	public function fetchReadRoles(string $sourceLocator, ?int $containerObjId, ?int $sourceIntId): array;
+
+	/**
+	 * Resolve a direct, user-facing link to the original content unit.
+	 *
+	 * The link MUST be stable and point to the canonical UI location
+	 * (e.g. ILIAS permalink, wiki page view, file download page, etc.).
+	 *
+	 * @return string absolute or relative URL
+	 */
+	public function getDirectLink(string $sourceLocator, ?int $containerObjId, ?int $sourceIntId): string;
 }
