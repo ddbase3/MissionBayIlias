@@ -111,7 +111,7 @@ Key components:
   * Adds filterable metadata:
 
     * roles
-    * subtree ref IDs
+    * ancestor ref IDs
     * collection keys
 
 Collection configuration:
@@ -133,7 +133,7 @@ MissionBayIlias provides:
 Capabilities:
 
 * resolve all `ref_id`s for an `obj_id`
-* compute merged subtree ref sets
+* compute merged ancestor ref sets
 
 Enables:
 

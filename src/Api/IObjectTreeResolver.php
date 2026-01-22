@@ -9,7 +9,7 @@ namespace MissionBayIlias\Api;
  * NOT content-kind specific.
  *
  * Used by the embedding extractor to understand where an object is mounted in the tree,
- * and to support subtree-based filtering during retrieval.
+ * and to support subtree-based filtering during retrieval by storing the *ancestor path ref_ids*.
  */
 interface IObjectTreeResolver {
 
@@ -21,13 +21,17 @@ interface IObjectTreeResolver {
 	public function getRefIdsByObjId(int $objId): array;
 
 	/**
-	 * Returns the merged list of all ref_ids that occur in ANY subtree of ANY mount path
-	 * of the given obj_id.
+	 * Returns the merged list of all ref_ids that occur in ANY ancestor path
+	 * (root -> ... -> mount) of ANY mount point of the given obj_id.
 	 *
-	 * This supports checks like: "Is element X contained in the subtree of container obj Y?"
-	 * even if Y is mounted multiple times (multiple ref_ids).
+	 * This supports checks like: "Is element X contained in the subtree of container ref_id Y?"
+	 * by storing all ancestor ref_ids for X and then checking whether Y is included.
+	 *
+	 * Example:
+	 * - mount path: "1.4599.4619"
+	 * - result: [1, 4599, 4619]
 	 *
 	 * @return int[] ref_ids (unique)
 	 */
-	public function getAllSubtreeRefIdsByObjId(int $objId): array;
+	public function getAllAncestorPathRefIdsByObjId(int $objId): array;
 }

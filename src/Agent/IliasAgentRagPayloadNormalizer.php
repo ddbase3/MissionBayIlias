@@ -66,6 +66,9 @@ final class IliasAgentRagPayloadNormalizer implements IAgentRagPayloadNormalizer
 
 			'content_id_hex' => ['type' => 'keyword', 'index' => false],
 			'source_kind' => ['type' => 'keyword', 'index' => true],
+
+			'type' => ['type' => 'keyword', 'index' => true],
+
 			'source_locator' => ['type' => 'keyword', 'index' => false],
 			'container_obj_id' => ['type' => 'integer', 'index' => true],
 			'source_int_id' => ['type' => 'integer', 'index' => false],
@@ -73,7 +76,8 @@ final class IliasAgentRagPayloadNormalizer implements IAgentRagPayloadNormalizer
 			'num_chunks' => ['type' => 'integer', 'index' => false],
 			'read_roles' => ['type' => 'integer', 'index' => true],
 			'mount_ref_ids' => ['type' => 'integer', 'index' => true],
-			'subtree_ref_ids' => ['type' => 'integer', 'index' => true],
+
+			'ancestor_ref_ids' => ['type' => 'integer', 'index' => true],
 
 			'title' => ['type' => 'text', 'index' => true],
 		];
@@ -111,7 +115,7 @@ final class IliasAgentRagPayloadNormalizer implements IAgentRagPayloadNormalizer
 
 		$this->assertIntArrayMeta($chunk->metadata, 'read_roles');
 		$this->assertIntArrayMeta($chunk->metadata, 'mount_ref_ids');
-		$this->assertIntArrayMeta($chunk->metadata, 'subtree_ref_ids');
+		$this->assertIntArrayMeta($chunk->metadata, 'ancestor_ref_ids');
 
 		if (array_key_exists('num_chunks', $chunk->metadata)) {
 			$n = $chunk->metadata['num_chunks'];
@@ -139,18 +143,22 @@ final class IliasAgentRagPayloadNormalizer implements IAgentRagPayloadNormalizer
 
 		$this->addIfString($payload, 'content_id_hex', $meta['content_id_hex'] ?? null);
 		$this->addIfString($payload, 'source_kind', $meta['source_kind'] ?? null);
+		$this->addIfString($payload, 'type', $meta['type'] ?? null);
 		$this->addIfString($payload, 'source_locator', $meta['source_locator'] ?? null);
 		$this->addIfInt($payload, 'container_obj_id', $meta['container_obj_id'] ?? null);
 		$this->addIfInt($payload, 'source_int_id', $meta['source_int_id'] ?? null);
 		$this->addIfString($payload, 'title', $meta['title'] ?? null);
 		$this->addIfInt($payload, 'num_chunks', $meta['num_chunks'] ?? null);
 
-		foreach (['read_roles', 'mount_ref_ids', 'subtree_ref_ids'] as $k) {
+		// Keep behavior for these: only include if non-empty
+		foreach (['read_roles', 'mount_ref_ids'] as $k) {
 			$arr = $this->normalizeIntArray($meta[$k] ?? null);
 			if ($arr) {
 				$payload[$k] = $arr;
 			}
 		}
+
+		$payload['ancestor_ref_ids'] = $this->normalizeIntArray($meta['ancestor_ref_ids'] ?? []);
 
 		$metaOut = $this->collectMeta($meta, array_keys($payload));
 		if ($metaOut) {

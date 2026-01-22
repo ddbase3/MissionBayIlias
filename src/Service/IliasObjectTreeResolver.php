@@ -8,7 +8,9 @@ use MissionBayIlias\Api\IObjectTreeResolver;
 /**
  * ILIAS tree / reference resolver based on DB tables:
  * - object_reference (ref_id -> obj_id)
- * - tree (nested set, keyed by ref_ids in "child")
+ * - tree (child ref_id rows with "path" representing root->...->child)
+ *
+ * Provides mount ref_ids and merged ancestor-path ref_ids for filtering.
  */
 final class IliasObjectTreeResolver implements IObjectTreeResolver {
 
@@ -17,9 +19,6 @@ final class IliasObjectTreeResolver implements IObjectTreeResolver {
 	) {
 	}
 
-	/**
-	 * {@inheritdoc}
-	 */
 	public function getRefIdsByObjId(int $objId): array {
 		$rows = $this->db->multiQuery(
 			'SELECT ref_id
@@ -40,40 +39,23 @@ final class IliasObjectTreeResolver implements IObjectTreeResolver {
 		return $refIds;
 	}
 
-	/**
-	 * {@inheritdoc}
-	 */
-	public function getAllSubtreeRefIdsByObjId(int $objId): array {
+	public function getAllAncestorPathRefIdsByObjId(int $objId): array {
 		$mountRefIds = $this->getRefIdsByObjId($objId);
 		if ($mountRefIds === []) {
 			return [];
 		}
 
-		// 1) Resolve nested-set bounds for each mount point.
-		$bounds = $this->getBoundsByRefIds($mountRefIds);
-		if ($bounds === []) {
-			return [];
+		$paths = $this->getPathsByRefIds($mountRefIds);
+		if ($paths === []) {
+			// Hard fallback: if path is missing for some reason, at least return mounts.
+			$unique = array_values(array_unique(array_map('intval', $mountRefIds)));
+			sort($unique, SORT_NUMERIC);
+			return $unique;
 		}
-
-		// 2) Merge to minimal set of non-overlapping intervals (performance).
-		$intervals = $this->mergeIntervals($bounds);
-
-		// 3) Fetch all subtree children for all merged intervals.
-		$whereParts = [];
-		foreach ($intervals as $it) {
-			$whereParts[] = '(tree = ' . (int)$it['tree'] . ' AND lft >= ' . (int)$it['lft'] . ' AND rgt <= ' . (int)$it['rgt'] . ')';
-		}
-
-		$rows = $this->db->multiQuery(
-			'SELECT child
-			 FROM tree
-			 WHERE ' . implode(' OR ', $whereParts)
-		);
 
 		$refIds = [];
-		foreach ($rows as $row) {
-			$rid = (int)($row['child'] ?? 0);
-			if ($rid > 0) {
+		foreach ($paths as $p) {
+			foreach ($this->parsePathRefIds((string)$p['path']) as $rid) {
 				$refIds[$rid] = true;
 			}
 		}
@@ -86,9 +68,9 @@ final class IliasObjectTreeResolver implements IObjectTreeResolver {
 
 	/**
 	 * @param int[] $refIds
-	 * @return array<int, array{tree:int,lft:int,rgt:int}>
+	 * @return array<int, array{tree:int,child:int,path:string}>
 	 */
-	private function getBoundsByRefIds(array $refIds): array {
+	private function getPathsByRefIds(array $refIds): array {
 		$refIds = array_values(array_unique(array_map('intval', $refIds)));
 		$refIds = array_values(array_filter($refIds, static fn(int $v) => $v > 0));
 		if ($refIds === []) {
@@ -96,80 +78,49 @@ final class IliasObjectTreeResolver implements IObjectTreeResolver {
 		}
 
 		$rows = $this->db->multiQuery(
-			'SELECT tree, child, lft, rgt
+			'SELECT tree, child, path
 			 FROM tree
-			 WHERE child IN (' . implode(',', $refIds) . ')'
+			 WHERE child IN (' . implode(',', $refIds) . ')
+			   AND path IS NOT NULL
+			   AND path <> \'\''
 		);
 
-		$bounds = [];
+		$out = [];
 		foreach ($rows as $row) {
 			$tree = (int)($row['tree'] ?? 0);
-			$lft = (int)($row['lft'] ?? 0);
-			$rgt = (int)($row['rgt'] ?? 0);
-			if ($tree > 0 && $lft > 0 && $rgt > 0 && $lft <= $rgt) {
-				$bounds[] = [
+			$child = (int)($row['child'] ?? 0);
+			$path = (string)($row['path'] ?? '');
+
+			if ($tree > 0 && $child > 0 && $path !== '') {
+				$out[] = [
 					'tree' => $tree,
-					'lft' => $lft,
-					'rgt' => $rgt,
+					'child' => $child,
+					'path' => $path,
 				];
 			}
 		}
 
-		return $bounds;
+		return $out;
 	}
 
 	/**
-	 * Merge overlapping / contained nested-set intervals per tree.
+	 * Parses a tree.path like "1.4599.4619" into [1,4599,4619].
 	 *
-	 * @param array<int, array{tree:int,lft:int,rgt:int}> $bounds
-	 * @return array<int, array{tree:int,lft:int,rgt:int}>
+	 * @return int[]
 	 */
-	private function mergeIntervals(array $bounds): array {
-		if ($bounds === []) {
+	private function parsePathRefIds(string $path): array {
+		$path = trim($path);
+		if ($path === '') {
 			return [];
 		}
 
-		usort($bounds, static function(array $a, array $b): int {
-			if ($a['tree'] !== $b['tree']) {
-				return $a['tree'] <=> $b['tree'];
-			}
-			if ($a['lft'] !== $b['lft']) {
-				return $a['lft'] <=> $b['lft'];
-			}
-			// For same lft, larger rgt first (so containers come before contained)
-			return $b['rgt'] <=> $a['rgt'];
-		});
-
+		$parts = explode('.', $path);
 		$out = [];
-		$cur = null;
-
-		foreach ($bounds as $b) {
-			if ($cur === null) {
-				$cur = $b;
-				continue;
+		foreach ($parts as $part) {
+			$rid = (int)trim($part);
+			if ($rid > 0) {
+				$out[] = $rid;
 			}
-
-			if ($b['tree'] !== $cur['tree']) {
-				$out[] = $cur;
-				$cur = $b;
-				continue;
-			}
-
-			// Disjoint interval -> flush current
-			if ($b['lft'] > $cur['rgt']) {
-				$out[] = $cur;
-				$cur = $b;
-				continue;
-			}
-
-			// Overlap/containment -> extend current rgt if needed
-			if ($b['rgt'] > $cur['rgt']) {
-				$cur['rgt'] = $b['rgt'];
-			}
-		}
-
-		if ($cur !== null) {
-			$out[] = $cur;
 		}
 
 		return $out;
