@@ -1,119 +1,202 @@
-# MissionBay ILIAS Embedding Pipeline (Planned)
+# MissionBayIlias
 
-> **License:** GNU GPL v3 (see **License** section)
+> **License:** GNU GPL v3
+>
+> **Namespace:** `MissionBayIlias`
+>
+> **Runtime:** BASE3 Framework (ILIAS integration)
 
-This project provides a **lightweight embedding and synchronization pipeline for ILIAS**, built on top of the **BASE3 Framework**.
-It is conceptually aligned with the existing MissionBay XRM embedding pipeline, but deliberately reduced in scope and adapted to the structural characteristics of ILIAS.
+MissionBayIlias provides the **ILIAS-specific extraction, normalization, and embedding integration** for the MissionBay ecosystem.
 
-The pipeline focuses on **reliable content synchronization**, **incremental updates**, and **clear separation of concerns**, forming a stable foundation for future embedding, retrieval, and assistive use cases.
+The project **directly feeds ILIAS content into the MissionBay / BASE3 agent-based embedding pipeline**, without intermediate indexing layers.
 
----
-
-## Motivation
-
-ILIAS content is distributed across heterogeneous modules with differing data models, update semantics, and storage locations. While this structure is suitable for an LMS, it complicates downstream processes such as indexing, synchronization, and semantic processing.
-
-The goal of the MissionBay ILIAS Embedding Pipeline is **not** to normalize or redesign ILIAS itself, but to introduce a **parallel, canonical content layer** that can be kept in sync with ILIAS and consumed by downstream systems.
-
-Embeddings and retrieval are treated as **subsequent consumers** of this content layer, not as its primary responsibility.
+This repository documents the **current, effective architecture** as it is implemented and operated.
 
 ---
 
-## Scope (Initial / Small Variant)
+## Core Goals
 
-The initial ILIAS variant intentionally limits its scope:
-
-* Content is processed at **content-unit level** (e.g. wiki pages, glossary terms, files, SCORM packages), not at object-container level.
-* Updates are detected using **database-level change indicators** only.
-* When a change is detected, the corresponding content unit is **fully reprocessed**.
-* No attempt is made to detect partial changes within complex objects (e.g. SCORM internals).
-
-This keeps the pipeline predictable, robust, and easy to operate.
-
----
-
-## Architecture Overview
-
-The pipeline follows the same high-level pattern as the XRM embedding pipeline, but with ILIAS-specific extractors and providers.
-
-### 1. Enqueue Job (ILIAS)
-
-* Scans ILIAS content sources incrementally
-* Operates on **content units**, not on `object_data` alone
-* Detects:
-
-  * new or changed content units → `upsert`
-  * removed content units → `delete`
-* Persists cursors and runtime state via the BASE3 `IStateStore`
-
-Each content type is handled by a dedicated provider, allowing operators to enable or disable specific sources independently.
-
----
-
-### 2. Embedding Flow (BASE3 Agent System)
-
-The actual embedding process reuses the existing **BASE3 agent-based embedding flow**:
-
-* Queue extraction
-* Content loading and normalization
-* Chunking
-* Embedding generation
-* Vector store synchronization
-* Acknowledgement and error handling
-
-The same agent concepts (extractors, parsers, chunkers, embedders, vector stores) are used, ensuring conceptual and technical consistency with the XRM pipeline.
-
----
-
-### 3. Data Model
-
-As with the XRM pipeline, the ILIAS variant uses two central tables:
-
-* `base3_embedding_job`
-  Queue table containing `upsert` and `delete` jobs with explicit state handling.
-
-* `base3_embedding_seen`
-  Tracks which content units were last observed, including version markers and deletion state.
-
-In addition, the ILIAS integration introduces a **canonical content identification scheme**, decoupling embedding units from ILIAS object IDs.
-
----
-
-## Relationship to BASE3 and XRM
-
-* The ILIAS embedding pipeline is a **sibling implementation** of the XRM embedding pipeline.
-* Both share:
-
-  * the same queue semantics
-  * the same agent-based embedding flow
-  * the same operational principles
-* Differences are isolated to:
+* Reliable **incremental embedding of ILIAS content**
+* Minimal and deterministic processing pipeline
+* Clear separation between:
 
   * content discovery
-  * change detection
-  * content loading
-
-This allows improvements in one pipeline to inform the other without tight coupling.
+  * embedding execution
+  * vector storage
 
 ---
 
-## Outlook
+## Architectural Position
 
-The initial implementation focuses on **correctness, stability, and synchronization fidelity**.
-Once a reliable canonical content layer is established, additional capabilities can be layered on top, such as:
+```
+ILIAS Database
+      │
+      ▼
+MissionBayIlias Content Providers
+      │
+      ▼
+MissionBay Agent Flow
+      │
+      ▼
+Vector Store (e.g. Qdrant)
+```
 
-* advanced retrieval strategies
-* assistive or conversational interfaces
-* domain-specific enrichment
-* alternative vector stores or embedding models
-
-These extensions remain optional and are intentionally not part of the initial scope.
+MissionBayIlias is responsible exclusively for **ILIAS-aware content discovery and normalization**.
 
 ---
 
-## License (GPL v3)
+## Content Providers
 
-This project is licensed under the **GNU General Public License, Version 3**.
+Each ILIAS content type is handled by a **dedicated provider** implementing `IContentProvider`.
 
-You may use, modify, and redistribute it under the terms of GPLv3.
-Derivative works must remain licensed under GPLv3 and provide source code accordingly.
+Providers:
+
+* operate directly on ILIAS schemas
+* detect changes via database-level indicators
+* emit embedding jobs directly
+
+Implemented providers include:
+
+* `WikiPageContentProvider`
+
+  * Extracts individual wiki pages
+  * Page-level change detection
+
+* `WikiContentProvider`
+
+  * Extracts the wiki object itself (parent)
+  * Low textual volume, structurally relevant
+
+Providers are:
+
+* incremental (cursor-based)
+* independent and toggleable
+* embedding-agnostic
+
+---
+
+## Queueing & Change Detection
+
+Content synchronization is handled **directly against the embedding queue**.
+
+Detection logic:
+
+* new or changed content → `upsert`
+* missing or deleted content → `delete`
+
+State is persisted via:
+
+* `base3_embedding_seen`
+* BASE3 `IStateStore`
+
+This ensures deterministic replay and safe restarts.
+
+---
+
+## Embedding Flow Integration
+
+MissionBayIlias integrates natively with the existing **MissionBay agent-based embedding flow**.
+
+Key components:
+
+* `IliasEmbeddingQueueExtractorAgentResource`
+
+  * Claims embedding jobs
+  * Loads content on demand
+  * Resolves ACLs and tree placement
+
+* `IliasAgentRagPayloadNormalizer`
+
+  * Produces Qdrant-ready payloads
+  * Adds filterable metadata:
+
+    * roles
+    * subtree ref IDs
+    * collection keys
+
+Collection configuration:
+
+* Logical key: `ilias`
+* Physical collection: `base3ilias_content_v1`
+
+---
+
+## ILIAS Tree Awareness
+
+ILIAS objects may be mounted multiple times in the tree.
+
+MissionBayIlias provides:
+
+* `IObjectTreeResolver`
+* `IliasObjectTreeResolver`
+
+Capabilities:
+
+* resolve all `ref_id`s for an `obj_id`
+* compute merged subtree ref sets
+
+Enables:
+
+* subtree-scoped retrieval
+* container-based filtering
+
+---
+
+## Design Principles
+
+* Single, direct embedding pipeline
+* No redundant lifecycle tracking
+* Explicit state handling
+* Replayable embedding jobs
+* Minimal surface area
+
+The embedding queue is the **single operational backbone**.
+
+---
+
+## Relationship to MissionBay XRM
+
+MissionBayIlias is a **sibling implementation** of MissionBay XRM.
+
+Shared:
+
+* agent-based embedding flow
+* queue semantics
+* vector storage model
+
+Different:
+
+* content discovery
+* ACL and tree resolution
+
+---
+
+## Current Status
+
+✅ Direct embedding workflow active
+✅ Wiki page + wiki parent providers live
+✅ Qdrant payloads verified
+✅ Tree-aware filtering functional
+
+The system is **lean, deterministic, and production-ready**.
+
+---
+
+## Open Follow-ups
+
+* Additional ILIAS content types (Glossary, Files, SCORM)
+* Performance tuning for large wiki trees
+* Optional batching strategies
+* ACL caching strategies
+
+All follow-ups are **explicitly optional**.
+
+---
+
+## License
+
+GNU General Public License v3
+
+This project is free software: you can redistribute it and/or modify it under the terms of GPLv3.
+
+Derivative works must remain GPLv3-compatible.
