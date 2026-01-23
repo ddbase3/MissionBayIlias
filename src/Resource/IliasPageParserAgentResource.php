@@ -10,12 +10,13 @@ use MissionBay\Resource\AbstractAgentResource;
 /**
  * IliasPageParserAgentResource
  *
- * Parses ILIAS PageObject-based payloads (wiki pages AND blog postings)
+ * Parses ILIAS PageObject-based payloads (wiki pages, blog postings, glossary terms)
  * and converts rendered HTML/XML into plain text while preserving paragraphs.
  *
  * Supported payload types:
  * - wiki_page
  * - blog_posting
+ * - glo_term
  *
  * Critical contract:
  * - Keep AgentParsedContent->structured in the extractor "root shape"
@@ -29,6 +30,7 @@ final class IliasPageParserAgentResource extends AbstractAgentResource implement
         private const SUPPORTED_TYPES = [
                 'wiki_page',
                 'blog_posting',
+                'glo_term',
         ];
 
         public static function getName(): string {
@@ -36,7 +38,7 @@ final class IliasPageParserAgentResource extends AbstractAgentResource implement
         }
 
         public function getDescription(): string {
-                return 'Parser for ILIAS PageObject content (wiki pages and blog postings): converts rendered HTML/XML to text and keeps extractor root shape for chunking.';
+                return 'Parser for ILIAS PageObject content (wiki pages, blog postings, glossary terms): converts rendered HTML/XML to text and keeps extractor root shape for chunking.';
         }
 
         public function getPriority(): int {

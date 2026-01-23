@@ -23,6 +23,8 @@ final class IliasEmbeddingEnqueueJob implements IJob {
         private const SOURCE_KIND_WHITELIST = [
 		'blog' => true,
 		'blog_posting' => true,
+		'glo' => true,
+		'glo_term' => true,
 		'wiki' => true,
                 'wiki_page' => true,
         ];
