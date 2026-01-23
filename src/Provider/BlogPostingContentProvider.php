@@ -9,12 +9,13 @@ use MissionBayIlias\Api\ContentUnit;
 use MissionBayIlias\Api\IObjectTreeResolver;
 use Base3\Database\Api\IDatabase;
 
-final class WikiPageContentProvider implements IContentProvider {
+final class BlogPostingContentProvider implements IContentProvider {
 
         private const SOURCE_SYSTEM = 'ilias';
-        private const SOURCE_KIND = 'wiki_page';
+        private const SOURCE_KIND = 'blog_posting';
 
-        private const PARENT_TYPE = 'wpg';
+        /** page_object.parent_type for blog postings */
+        private const PARENT_TYPE = 'blp';
 
         public function __construct(
                 private readonly IDatabase $db,
@@ -22,7 +23,7 @@ final class WikiPageContentProvider implements IContentProvider {
         ) {}
 
         public static function getName(): string {
-                return 'wikipagecontentprovider';
+                return 'blogpostingcontentprovider';
         }
 
         public function isActive() {
@@ -42,22 +43,28 @@ final class WikiPageContentProvider implements IContentProvider {
 
                 $rows = $this->queryAll(
                         "SELECT
-                                p.page_id,
-                                p.parent_id AS wiki_obj_id,
+                                b.id AS posting_id,
+                                b.blog_id,
+                                b.title AS posting_title,
+                                b.created AS posting_created,
                                 p.last_change,
                                 p.render_md5,
                                 p.rendered_content
-                        FROM page_object p
-                        WHERE p.parent_type = '" . $this->esc(self::PARENT_TYPE) . "'
-                          AND p.last_change IS NOT NULL
+                        FROM il_blog_posting b
+                        INNER JOIN object_data o ON o.obj_id = b.blog_id AND o.type = 'blog'
+                        LEFT JOIN page_object p
+                                ON p.page_id = b.id
+                                AND p.parent_id = b.blog_id
+                                AND p.parent_type = '" . $this->esc(self::PARENT_TYPE) . "'
+                        WHERE COALESCE(p.last_change, b.created) IS NOT NULL
                           AND (
-                                p.last_change > '" . $this->esc($cursor->changedAt) . "'
+                                COALESCE(p.last_change, b.created) > '" . $this->esc($cursor->changedAt) . "'
                                 OR (
-                                        p.last_change = '" . $this->esc($cursor->changedAt) . "'
-                                        AND p.page_id > " . (int)$cursor->changedId . "
+                                        COALESCE(p.last_change, b.created) = '" . $this->esc($cursor->changedAt) . "'
+                                        AND b.id > " . (int)$cursor->changedId . "
                                 )
                           )
-                        ORDER BY p.last_change ASC, p.page_id ASC
+                        ORDER BY COALESCE(p.last_change, b.created) ASC, b.id ASC
                         LIMIT " . $limit
                 );
 
@@ -70,46 +77,46 @@ final class WikiPageContentProvider implements IContentProvider {
                 $maxId = $cursor->changedId;
 
                 foreach ($rows as $row) {
-                        $pageId = (int)($row['page_id'] ?? 0);
-                        $wikiObjId = (int)($row['wiki_obj_id'] ?? 0);
-                        $lastChange = (string)($row['last_change'] ?? '');
+                        $postingId = (int)($row['posting_id'] ?? 0);
+                        $blogObjId = (int)($row['blog_id'] ?? 0);
 
-                        if ($pageId <= 0 || $wikiObjId <= 0 || $lastChange === '') {
+                        $ts = (string)($row['last_change'] ?? '');
+                        if ($ts === '') {
+                                $ts = (string)($row['posting_created'] ?? '');
+                        }
+
+                        if ($postingId <= 0 || $blogObjId <= 0 || $ts === '') {
                                 continue;
                         }
 
-                        $rendered = (string)($row['rendered_content'] ?? '');
-                        $title = $this->extractPageTitle($rendered);
-                        if ($title === null || trim($title) === '') {
-                                $title = 'Wiki Page #' . $pageId;
+                        $title = $this->nullIfEmpty((string)($row['posting_title'] ?? ''));
+                        if ($title === null) {
+                                $title = 'Blog Posting #' . $postingId;
                         }
 
-                        $locator = 'wiki:' . $wikiObjId . ':' . $pageId;
+                        $locator = 'blog:' . $blogObjId . ':' . $postingId;
 
                         $units[] = new ContentUnit(
                                 self::SOURCE_SYSTEM,
                                 self::SOURCE_KIND,
                                 $locator,
-                                $wikiObjId,
-                                $pageId,
+                                $blogObjId,
+                                $postingId,
                                 $title,
                                 null,
-                                $lastChange,
-                                $row['render_md5'] ?? null
+                                $ts,
+                                $this->nullIfEmpty((string)($row['render_md5'] ?? ''))
                         );
 
-                        if ($lastChange > $maxTs) {
-                                $maxTs = $lastChange;
-                                $maxId = $pageId;
-                        } elseif ($lastChange === $maxTs && $pageId > $maxId) {
-                                $maxId = $pageId;
+                        if ($ts > $maxTs) {
+                                $maxTs = $ts;
+                                $maxId = $postingId;
+                        } elseif ($ts === $maxTs && $postingId > $maxId) {
+                                $maxId = $postingId;
                         }
                 }
 
-                return new ContentBatch(
-                        $units,
-                        new ContentCursor($maxTs, $maxId)
-                );
+                return new ContentBatch($units, new ContentCursor($maxTs, $maxId));
         }
 
         public function fetchMissingSourceIntIds(int $limit): array {
@@ -118,13 +125,13 @@ final class WikiPageContentProvider implements IContentProvider {
                 $rows = $this->queryAll(
                         "SELECT s.source_int_id
                          FROM base3_embedding_seen s
-                         LEFT JOIN page_object p ON p.page_id = s.source_int_id
+                         LEFT JOIN il_blog_posting b ON b.id = s.source_int_id
                          WHERE s.source_system = '" . $this->esc(self::SOURCE_SYSTEM) . "'
                            AND s.source_kind = '" . $this->esc(self::SOURCE_KIND) . "'
                            AND s.source_int_id IS NOT NULL
                            AND s.missing_since IS NULL
                            AND s.deleted_at IS NULL
-                           AND p.page_id IS NULL
+                           AND b.id IS NULL
                          LIMIT " . $limit
                 );
 
@@ -140,36 +147,33 @@ final class WikiPageContentProvider implements IContentProvider {
         }
 
         public function fetchContent(string $sourceLocator, ?int $containerObjId, ?int $sourceIntId): array {
-                $pageId = (int)($sourceIntId ?? 0);
-                $wikiObjId = (int)($containerObjId ?? 0);
+                $postingId = (int)($sourceIntId ?? 0);
+                $blogObjId = (int)($containerObjId ?? 0);
 
-                if ($pageId <= 0) {
-                        $pageId = $this->parsePageIdFromLocator($sourceLocator);
+                if ($postingId <= 0) {
+                        $postingId = $this->parsePostingIdFromLocator($sourceLocator);
                 }
-                if ($wikiObjId <= 0) {
-                        $wikiObjId = $this->parseWikiObjIdFromLocator($sourceLocator);
+                if ($blogObjId <= 0) {
+                        $blogObjId = $this->parseBlogObjIdFromLocator($sourceLocator);
                 }
-                if ($pageId <= 0) {
+                if ($postingId <= 0) {
                         return [];
                 }
 
                 $rows = $this->queryAll(
                         "SELECT
-                                p.page_id,
-                                p.parent_id AS wiki_obj_id,
-                                p.last_change,
-                                p.created,
-                                p.active,
-                                p.is_empty,
-                                p.lang,
-                                p.render_md5,
+                                b.id AS posting_id,
+                                b.blog_id,
+                                b.title AS posting_title,
+                                b.created AS posting_created,
                                 p.rendered_content,
-                                wp.title AS page_title,
-                                wp.lang AS page_lang
-                        FROM page_object p
-                        LEFT JOIN il_wiki_page wp ON wp.id = p.page_id
-                        WHERE p.page_id = " . (int)$pageId . "
-                          AND p.parent_type = '" . $this->esc(self::PARENT_TYPE) . "'
+                                p.content
+                        FROM il_blog_posting b
+                        LEFT JOIN page_object p
+                                ON p.page_id = b.id
+                                AND p.parent_id = b.blog_id
+                                AND p.parent_type = '" . $this->esc(self::PARENT_TYPE) . "'
+                        WHERE b.id = " . (int)$postingId . "
                         LIMIT 1"
                 );
 
@@ -178,55 +182,46 @@ final class WikiPageContentProvider implements IContentProvider {
                         return [];
                 }
 
-                $rendered = (string)($r['rendered_content'] ?? '');
-
                 // CONTRACT: title MUST be string
-                $title =
-                        $this->extractPageTitle($rendered)
-                        ?? trim((string)($r['page_title'] ?? ''))
-                        ?? '';
-
+                $title = trim((string)($r['posting_title'] ?? ''));
                 if ($title === '') {
-                        $title = 'Wiki Page #' . $pageId;
+                        $title = 'Blog Posting #' . $postingId;
                 }
 
+                $rendered = (string)($r['rendered_content'] ?? '');
+                $raw = (string)($r['content'] ?? '');
+
                 return [
-                        'type' => 'wiki_page',
-                        'page_id' => (int)$r['page_id'],
-                        'wiki_obj_id' => (int)$r['wiki_obj_id'],
+                        'type' => 'blog_posting',
+                        'posting_id' => (int)$r['posting_id'],
+                        'blog_obj_id' => (int)($r['blog_id'] ?? $blogObjId),
                         'source_locator' => $sourceLocator,
                         'title' => $title,
-                        'content' => $rendered,
+                        'content' => $rendered !== '' ? $rendered : $raw,
                         'meta' => [
-                                'last_change' => trim((string)($r['last_change'] ?? '')),
-                                'created' => trim((string)($r['created'] ?? '')),
-                                'active' => isset($r['active']) ? (int)$r['active'] : null,
-                                'is_empty' => isset($r['is_empty']) ? (int)$r['is_empty'] : null,
-                                'lang' => trim((string)($r['lang'] ?? '')),
-                                'page_lang' => trim((string)($r['page_lang'] ?? '')),
-                                'render_md5' => trim((string)($r['render_md5'] ?? '')),
+                                'posting_created' => $this->nullIfEmpty((string)($r['posting_created'] ?? '')),
                         ]
                 ];
         }
 
         public function fetchReadRoles(string $sourceLocator, ?int $containerObjId, ?int $sourceIntId): array {
-                $wikiObjId = $containerObjId > 0
+                $blogObjId = $containerObjId > 0
                         ? (int)$containerObjId
-                        : $this->parseWikiObjIdFromLocator($sourceLocator);
+                        : $this->parseBlogObjIdFromLocator($sourceLocator);
 
-                if ($wikiObjId <= 0) {
+                if ($blogObjId <= 0) {
                         return [];
                 }
 
-                $refIds = \ilObject::_getAllReferences($wikiObjId);
+                $refIds = \ilObject::_getAllReferences($blogObjId);
                 if (!$refIds) {
                         return [];
                 }
 
                 global $DIC;
                 $review = $DIC->rbac()->review();
-                $readOpsId = $this->getReadOpsIdForType('wiki');
 
+                $readOpsId = $this->getReadOpsIdForType('blog');
                 if ($readOpsId <= 0) {
                         return [];
                 }
@@ -259,28 +254,10 @@ final class WikiPageContentProvider implements IContentProvider {
                         return '';
                 }
 
-                return 'goto.php/wiki/wpage_' . (int)$sourceIntId . '_' . (int)$refIds[0];
+                return 'goto.php/blog/' . (int)$refIds[0] . '/' . (int)$sourceIntId;
         }
 
         /* ---------- Helpers ---------- */
-
-        private function extractPageTitle(string $renderedContent): ?string {
-                if (preg_match('/<h1[^>]*>(.*?)<\/h1>/is', $renderedContent, $m)) {
-                        $t = trim(strip_tags((string)($m[1] ?? '')));
-                        return $t !== '' ? $t : null;
-                }
-                return null;
-        }
-
-        private function parseWikiObjIdFromLocator(string $locator): int {
-                $p = explode(':', trim($locator));
-                return ($p[0] ?? '') === 'wiki' ? (int)($p[1] ?? 0) : 0;
-        }
-
-        private function parsePageIdFromLocator(string $locator): int {
-                $p = explode(':', trim($locator));
-                return (int)($p[2] ?? 0);
-        }
 
         private function getReadOpsIdForType(string $type): int {
                 static $cache = [];
@@ -296,6 +273,21 @@ final class WikiPageContentProvider implements IContentProvider {
                 }
 
                 return $cache[$type] = 0;
+        }
+
+        private function parseBlogObjIdFromLocator(string $locator): int {
+                $p = explode(':', trim($locator));
+                return ($p[0] ?? '') === 'blog' ? (int)($p[1] ?? 0) : 0;
+        }
+
+        private function parsePostingIdFromLocator(string $locator): int {
+                $p = explode(':', trim($locator));
+                return (int)($p[2] ?? 0);
+        }
+
+        private function nullIfEmpty(string $v): ?string {
+                $v = trim($v);
+                return $v !== '' ? $v : null;
         }
 
         private function queryAll(string $sql): array {

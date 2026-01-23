@@ -67,8 +67,6 @@ final class IliasAgentRagPayloadNormalizer implements IAgentRagPayloadNormalizer
 			'content_id_hex' => ['type' => 'keyword', 'index' => false],
 			'source_kind' => ['type' => 'keyword', 'index' => true],
 
-			'type' => ['type' => 'keyword', 'index' => true],
-
 			'source_locator' => ['type' => 'keyword', 'index' => false],
 			'container_obj_id' => ['type' => 'integer', 'index' => true],
 			'source_int_id' => ['type' => 'integer', 'index' => false],
@@ -124,8 +122,14 @@ final class IliasAgentRagPayloadNormalizer implements IAgentRagPayloadNormalizer
 			}
 		}
 
+		// normalize & enforce canonical keys
 		$chunk->collectionKey = $canonical;
 		$chunk->metadata['content_uuid'] = strtoupper($contentUuid);
+
+		// eliminate redundant "type" (we keep "source_kind" as canonical kind)
+		if (array_key_exists('type', $chunk->metadata)) {
+			unset($chunk->metadata['type']);
+		}
 	}
 
 	public function buildPayload(AgentEmbeddingChunk $chunk): array {
@@ -143,7 +147,6 @@ final class IliasAgentRagPayloadNormalizer implements IAgentRagPayloadNormalizer
 
 		$this->addIfString($payload, 'content_id_hex', $meta['content_id_hex'] ?? null);
 		$this->addIfString($payload, 'source_kind', $meta['source_kind'] ?? null);
-		$this->addIfString($payload, 'type', $meta['type'] ?? null);
 		$this->addIfString($payload, 'source_locator', $meta['source_locator'] ?? null);
 		$this->addIfInt($payload, 'container_obj_id', $meta['container_obj_id'] ?? null);
 		$this->addIfInt($payload, 'source_int_id', $meta['source_int_id'] ?? null);

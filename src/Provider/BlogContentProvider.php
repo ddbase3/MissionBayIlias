@@ -9,10 +9,10 @@ use MissionBayIlias\Api\ContentUnit;
 use MissionBayIlias\Api\IObjectTreeResolver;
 use Base3\Database\Api\IDatabase;
 
-final class WikiContentProvider implements IContentProvider {
+final class BlogContentProvider implements IContentProvider {
 
         private const SOURCE_SYSTEM = 'ilias';
-        private const SOURCE_KIND = 'wiki';
+        private const SOURCE_KIND = 'blog';
 
         public function __construct(
                 private readonly IDatabase $db,
@@ -20,7 +20,7 @@ final class WikiContentProvider implements IContentProvider {
         ) {}
 
         public static function getName(): string {
-                return 'wikicontentprovider';
+                return 'blogcontentprovider';
         }
 
         public function isActive() {
@@ -45,10 +45,11 @@ final class WikiContentProvider implements IContentProvider {
                                 o.description,
                                 o.last_update,
                                 o.create_date,
-                                w.introduction
+                                o.owner,
+                                o.offline,
+                                o.import_id
                         FROM object_data o
-                        LEFT JOIN il_wiki_data w ON w.id = o.obj_id
-                        WHERE o.type = 'wiki'
+                        WHERE o.type = 'blog'
                           AND o.last_update IS NOT NULL
                           AND (
                                 o.last_update > '" . $this->esc($cursor->changedAt) . "'
@@ -77,13 +78,10 @@ final class WikiContentProvider implements IContentProvider {
                                 continue;
                         }
 
-                        $title = trim((string)($row['title'] ?? ''));
-                        $intro = trim((string)($row['introduction'] ?? ''));
-                        $desc  = trim((string)($row['description'] ?? ''));
+                        $title = $this->nullIfEmpty((string)($row['title'] ?? ''));
+                        $desc  = $this->nullIfEmpty((string)($row['description'] ?? ''));
 
-                        $description = $intro !== '' ? $intro : ($desc !== '' ? $desc : null);
-
-                        $locator = 'wiki:' . $objId;
+                        $locator = 'blog:' . $objId;
 
                         $units[] = new ContentUnit(
                                 self::SOURCE_SYSTEM,
@@ -91,8 +89,8 @@ final class WikiContentProvider implements IContentProvider {
                                 $locator,
                                 $objId,
                                 $objId,
-                                $title !== '' ? $title : null,
-                                $description,
+                                $title,
+                                $desc,
                                 $lastUpdate,
                                 null
                         );
@@ -105,10 +103,7 @@ final class WikiContentProvider implements IContentProvider {
                         }
                 }
 
-                return new ContentBatch(
-                        $units,
-                        new ContentCursor($maxTs, $maxId)
-                );
+                return new ContentBatch($units, new ContentCursor($maxTs, $maxId));
         }
 
         public function fetchMissingSourceIntIds(int $limit): array {
@@ -119,7 +114,7 @@ final class WikiContentProvider implements IContentProvider {
                          FROM base3_embedding_seen s
                          LEFT JOIN object_data o
                            ON o.obj_id = s.source_int_id
-                          AND o.type = 'wiki'
+                          AND o.type = 'blog'
                          WHERE s.source_system = '" . $this->esc(self::SOURCE_SYSTEM) . "'
                            AND s.source_kind = '" . $this->esc(self::SOURCE_KIND) . "'
                            AND s.source_int_id IS NOT NULL
@@ -143,6 +138,9 @@ final class WikiContentProvider implements IContentProvider {
         public function fetchContent(string $sourceLocator, ?int $containerObjId, ?int $sourceIntId): array {
                 $objId = $containerObjId !== null ? (int)$containerObjId : (int)($sourceIntId ?? 0);
                 if ($objId <= 0) {
+                        $objId = $this->parseObjIdFromLocator($sourceLocator);
+                }
+                if ($objId <= 0) {
                         return [];
                 }
 
@@ -155,14 +153,10 @@ final class WikiContentProvider implements IContentProvider {
                                 o.create_date,
                                 o.owner,
                                 o.offline,
-                                o.import_id,
-                                w.startpage,
-                                w.introduction,
-                                w.is_online
+                                o.import_id
                         FROM object_data o
-                        LEFT JOIN il_wiki_data w ON w.id = o.obj_id
                         WHERE o.obj_id = " . (int)$objId . "
-                          AND o.type = 'wiki'
+                          AND o.type = 'blog'
                         LIMIT 1"
                 );
 
@@ -173,28 +167,32 @@ final class WikiContentProvider implements IContentProvider {
 
                 // CONTRACT: title MUST be string
                 $title = trim((string)($r['title'] ?? ''));
+                if ($title === '') {
+                        $title = 'Blog #' . $objId;
+                }
 
                 return [
-                        'type' => 'wiki',
+                        'type' => 'blog',
                         'obj_id' => (int)$r['obj_id'],
                         'source_locator' => $sourceLocator,
                         'title' => $title,
-                        'description' => trim((string)($r['description'] ?? '')),
-                        'content' => trim((string)($r['introduction'] ?? '')),
+                        'description' => $this->nullIfEmpty((string)($r['description'] ?? '')),
+                        'content' => '',
                         'meta' => [
-                                'startpage' => trim((string)($r['startpage'] ?? '')),
-                                'is_online' => isset($r['is_online']) ? (int)$r['is_online'] : null,
-                                'last_update' => trim((string)($r['last_update'] ?? '')),
-                                'create_date' => trim((string)($r['create_date'] ?? '')),
+                                'last_update' => $this->nullIfEmpty((string)($r['last_update'] ?? '')),
+                                'create_date' => $this->nullIfEmpty((string)($r['create_date'] ?? '')),
                                 'owner' => isset($r['owner']) ? (int)$r['owner'] : null,
                                 'offline' => isset($r['offline']) ? (int)$r['offline'] : null,
-                                'import_id' => trim((string)($r['import_id'] ?? '')),
+                                'import_id' => $this->nullIfEmpty((string)($r['import_id'] ?? '')),
                         ]
                 ];
         }
 
         public function fetchReadRoles(string $sourceLocator, ?int $containerObjId, ?int $sourceIntId): array {
                 $objId = $containerObjId !== null ? (int)$containerObjId : (int)($sourceIntId ?? 0);
+                if ($objId <= 0) {
+                        $objId = $this->parseObjIdFromLocator($sourceLocator);
+                }
                 if ($objId <= 0) {
                         return [];
                 }
@@ -207,7 +205,7 @@ final class WikiContentProvider implements IContentProvider {
                 global $DIC;
                 $review = $DIC->rbac()->review();
 
-                $readOpsId = $this->getReadOpsIdForType('wiki');
+                $readOpsId = $this->getReadOpsIdForType('blog');
                 if ($readOpsId <= 0) {
                         return [];
                 }
@@ -215,19 +213,13 @@ final class WikiContentProvider implements IContentProvider {
                 $roleIds = [];
 
                 foreach ($refIds as $refId) {
-                        $refId = (int)$refId;
-                        if ($refId <= 0) {
-                                continue;
-                        }
-
-                        foreach ($review->getParentRoleIds($refId) as $r) {
+                        foreach ($review->getParentRoleIds((int)$refId) as $r) {
                                 $rolId = (int)($r['rol_id'] ?? 0);
                                 if ($rolId <= 0) {
                                         continue;
                                 }
 
-                                $ops = $review->getActiveOperationsOfRole($refId, $rolId);
-                                if ($ops && in_array($readOpsId, $ops, true)) {
+                                if (in_array($readOpsId, $review->getActiveOperationsOfRole((int)$refId, $rolId), true)) {
                                         $roleIds[$rolId] = true;
                                 }
                         }
@@ -246,9 +238,7 @@ final class WikiContentProvider implements IContentProvider {
                         return '';
                 }
 
-                return 'ilias.php?baseClass=ilWikiHandlerGUI'
-                        . '&ref_id=' . (int)$refIds[0]
-                        . '&cmd=view';
+                return 'goto.php/blog/' . (int)$refIds[0];
         }
 
         /* ---------- Helpers ---------- */
@@ -260,15 +250,23 @@ final class WikiContentProvider implements IContentProvider {
                         return (int)$cache[$type];
                 }
 
-                $readOpsId = 0;
                 foreach (\ilRbacReview::_getOperationList($type) as $op) {
                         if (($op['operation'] ?? '') === 'read') {
-                                $readOpsId = (int)($op['ops_id'] ?? 0);
-                                break;
+                                return $cache[$type] = (int)$op['ops_id'];
                         }
                 }
 
-                return $cache[$type] = $readOpsId;
+                return $cache[$type] = 0;
+        }
+
+        private function parseObjIdFromLocator(string $locator): int {
+                $parts = explode(':', trim($locator));
+                return ($parts[0] ?? '') === 'blog' ? (int)($parts[1] ?? 0) : 0;
+        }
+
+        private function nullIfEmpty(string $v): ?string {
+                $v = trim($v);
+                return $v !== '' ? $v : null;
         }
 
         private function queryAll(string $sql): array {
