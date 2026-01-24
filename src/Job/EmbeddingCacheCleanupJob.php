@@ -3,6 +3,7 @@
 namespace MissionBayIlias\Job;
 
 use Base3\Worker\Api\IJob;
+use Base3\Configuration\Api\IConfiguration;
 use Base3\Database\Api\IDatabase;
 use Base3\State\Api\IStateStore;
 
@@ -39,13 +40,17 @@ final class EmbeddingCacheCleanupJob implements IJob {
 	private const DEFAULT_TABLE = 'base3_embedding_cache';
 	private const DEFAULT_RETENTION_HOURS = 168; // 7 days
 	private const DEFAULT_DELETE_BATCH = 20000;
+	private const DEFAULT_PRIORITY = 1;
 
 	// Run window (application/server timezone)
 	private const WINDOW_START = '02:00';
 	private const WINDOW_END = '04:00';
 
+	private ?array $missionbayIliasConf = null;
+
 	public function __construct(
 		private readonly IDatabase $db,
+		private readonly IConfiguration $configuration,
 		private readonly IStateStore $state
 	) {}
 
@@ -54,11 +59,13 @@ final class EmbeddingCacheCleanupJob implements IJob {
 	}
 
 	public function isActive() {
-		return true;
+		$conf = $this->getMissionbayIliasConf();
+		return ((int)($conf['embeddingcachecleanupjob.active'] ?? 0)) === 1;
 	}
 
 	public function getPriority() {
-		return 1;
+		$conf = $this->getMissionbayIliasConf();
+		return (int)($conf['embeddingcachecleanupjob.priority'] ?? self::DEFAULT_PRIORITY);
 	}
 
 	public function go() {
@@ -87,6 +94,13 @@ final class EmbeddingCacheCleanupJob implements IJob {
 		$this->touchLastRunAt();
 
 		return 'Embedding cache cleanup done (table: ' . $table . ', cutoff: ' . $cutoff . ', limit: ' . $deleteBatch . ')';
+	}
+
+	private function getMissionbayIliasConf(): array {
+		if ($this->missionbayIliasConf === null) {
+			$this->missionbayIliasConf = (array)$this->configuration->get('missionbayilias');
+		}
+		return $this->missionbayIliasConf;
 	}
 
 	/* ---------- Cleanup ---------- */

@@ -3,6 +3,7 @@
 namespace MissionBayIlias\Job;
 
 use Base3\Worker\Api\IJob;
+use Base3\Configuration\Api\IConfiguration;
 use Base3\Database\Api\IDatabase;
 use Base3\State\Api\IStateStore;
 
@@ -47,8 +48,13 @@ final class EmbeddingQueueCleanupJob implements IJob {
 	private const TABLE_JOB = 'base3_embedding_job';
 	private const TABLE_SEEN = 'base3_embedding_seen';
 
+	private const DEFAULT_PRIORITY = 1;
+
+	private ?array $missionbayIliasConf = null;
+
 	public function __construct(
 		private readonly IDatabase $db,
+		private readonly IConfiguration $configuration,
 		private readonly IStateStore $state
 	) {}
 
@@ -57,11 +63,13 @@ final class EmbeddingQueueCleanupJob implements IJob {
 	}
 
 	public function isActive() {
-		return true;
+		$conf = $this->getMissionbayIliasConf();
+		return ((int)($conf['embeddingqueuecleanupjob.active'] ?? 0)) === 1;
 	}
 
 	public function getPriority() {
-		return 1;
+		$conf = $this->getMissionbayIliasConf();
+		return (int)($conf['embeddingqueuecleanupjob.priority'] ?? self::DEFAULT_PRIORITY);
 	}
 
 	public function go() {
@@ -93,6 +101,13 @@ final class EmbeddingQueueCleanupJob implements IJob {
 		$this->touchLastRunAt();
 
 		return 'Embedding queue cleanup done (cutoff: ' . $cutoff . ', jobs_superseded_deleted: ' . $deletedJob . ', seen_deleted_deleted: ' . $deletedSeen . ')';
+	}
+
+	private function getMissionbayIliasConf(): array {
+		if ($this->missionbayIliasConf === null) {
+			$this->missionbayIliasConf = (array)$this->configuration->get('missionbayilias');
+		}
+		return $this->missionbayIliasConf;
 	}
 
 	/* ---------- Cleanup: base3_embedding_job ---------- */

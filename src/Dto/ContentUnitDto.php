@@ -1,13 +1,13 @@
 <?php declare(strict_types=1);
 
-namespace MissionBayIlias\Api;
+namespace MissionBayIlias\Dto;
 
 /**
- * ContentUnit
+ * ContentUnitDto
  *
  * Normalized content unit record emitted by providers.
  */
-final class ContentUnit {
+final class ContentUnitDto {
 
 	public function __construct(
 		public readonly string $sourceSystem,

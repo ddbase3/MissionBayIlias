@@ -3,6 +3,8 @@
 namespace MissionBayIlias\Api;
 
 use Base3\Api\IBase;
+use MissionBayIlias\Dto\ContentBatchDto;
+use MissionBayIlias\Dto\ContentCursorDto;
 
 /**
  * Interface IContentProvider
@@ -53,7 +55,7 @@ interface IContentProvider extends IBase {
          * Providers MUST use a stable ordering and a deterministic tie-breaker
          * for equal timestamps.
          */
-        public function fetchChanged(ContentCursor $cursor, int $limit): ContentBatch;
+        public function fetchChanged(ContentCursorDto $cursor, int $limit): ContentBatchDto;
 
         /**
          * Returns source_int_ids that are missing in the source system

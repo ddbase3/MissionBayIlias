@@ -2,7 +2,7 @@
 	"nodes": [
 		{ "id": "embedding", "type": "aiembeddingnode", "docks": {
 			"extractor": [ "extractor" ],
-			"parser": [ "pageparser", "parser" ],
+			"parser": [ "pageparser", "courseparser", "parser" ],
 			"chunker": [ "chunker" ],
 			"embedder": [ "embeddingcache" ],
 			"vectordb": [ "vectordb" ],
@@ -19,6 +19,7 @@
 		}},
 
 		{ "id": "pageparser", "type": "iliaspageparseragentresource" },
+		{ "id": "courseparser", "type": "iliascourseparseragentresource" },
 		{ "id": "parser", "type": "structuredobjectparseragentresource" },
 
 		{ "id": "chunker", "type": "iliaschunkeragentresource", "config": {

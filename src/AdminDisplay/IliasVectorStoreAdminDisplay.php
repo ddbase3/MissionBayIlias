@@ -11,13 +11,13 @@ use UiFoundation\Api\IAdminDisplay;
 
 final class IliasVectorStoreAdminDisplay implements IAdminDisplay {
 
-	/** @var string canonical logical collection key for ILIAS */
+	/** @var string Canonical logical collection key for ILIAS */
 	private const COLLECTION_KEY = 'ilias';
 
-	/** @var string resource technical name (as registered in classmap) */
+	/** @var string Resource technical name (as registered in classmap) */
 	private const RESOURCE_NAME = 'qualitusqdrantvectorstoreagentresource';
 
-	/** @var string section of vectordb configuration values */
+	/** @var string Section of vector db configuration values */
 	private const CONNECTION_CONFIG_SECTION = 'qualitusvectordb';
 
 	public function __construct(
@@ -32,7 +32,7 @@ final class IliasVectorStoreAdminDisplay implements IAdminDisplay {
 	}
 
 	public function setData($data) {
-		// no-op (can be used later for embedding into other UIs)
+		// No-op (can be used later for embedding into other UIs)
 	}
 
 	public function getHelp() {
@@ -73,31 +73,116 @@ final class IliasVectorStoreAdminDisplay implements IAdminDisplay {
 
 		try {
 			return match ($action) {
-				'create' => $this->jsonSuccess([
-					'message' => 'Collection created successfully.',
-					'collectionKey' => self::COLLECTION_KEY
-				], fn() => $store->createCollection(self::COLLECTION_KEY)),
-
-				'delete' => $this->jsonSuccess([
-					'message' => 'Collection deleted successfully.',
-					'collectionKey' => self::COLLECTION_KEY
-				], fn() => $store->deleteCollection(self::COLLECTION_KEY)),
-
-				'info' => $this->jsonSuccess([
-					'collectionKey' => self::COLLECTION_KEY,
-					'info' => $store->getInfo(self::COLLECTION_KEY)
-				]),
-
-				'stats' => $this->jsonSuccess([
-					'collectionKey' => self::COLLECTION_KEY,
-					'stats' => $this->buildStats($store->getInfo(self::COLLECTION_KEY))
-				]),
-
+				'create' => $this->handleCreate($store),
+				'delete' => $this->handleDelete($store),
+				'info' => $this->handleInfo($store),
+				'stats' => $this->handleStats($store),
 				default => $this->jsonError("Unknown action '$action'. Use: create|delete|info|stats"),
 			};
 		} catch (\Throwable $e) {
 			return $this->jsonError('Exception: ' . $e->getMessage());
 		}
+	}
+
+	private function handleCreate(IAgentVectorStore $store): string {
+		$store->createCollection(self::COLLECTION_KEY);
+
+		// Return fresh state so the UI can update immediately (no page reload needed)
+		$info = $store->getInfo(self::COLLECTION_KEY);
+
+		return $this->jsonSuccess([
+			'message' => 'Collection created successfully.',
+			'collectionKey' => self::COLLECTION_KEY,
+			'exists' => true,
+			'info' => $info,
+			'stats' => $this->buildStats($info),
+		]);
+	}
+
+	private function handleDelete(IAgentVectorStore $store): string {
+		$store->deleteCollection(self::COLLECTION_KEY);
+
+		// After deletion, stats/info are not available. Return an explicit "not exists" state.
+		return $this->jsonSuccess([
+			'message' => 'Collection deleted successfully.',
+			'collectionKey' => self::COLLECTION_KEY,
+			'exists' => false,
+			'info' => null,
+			'stats' => $this->buildEmptyStats('Collection does not exist (deleted).'),
+		]);
+	}
+
+	private function handleInfo(IAgentVectorStore $store): string {
+		$info = $store->getInfo(self::COLLECTION_KEY);
+
+		return $this->jsonSuccess([
+			'collectionKey' => self::COLLECTION_KEY,
+			'exists' => true,
+			'info' => $info,
+		]);
+	}
+
+	private function handleStats(IAgentVectorStore $store): string {
+		try {
+			$info = $store->getInfo(self::COLLECTION_KEY);
+
+			return $this->jsonSuccess([
+				'collectionKey' => self::COLLECTION_KEY,
+				'exists' => true,
+				'stats' => $this->buildStats($info),
+			]);
+		} catch (\Throwable $e) {
+			// Common case: collection does not exist -> return a stable "empty stats" payload
+			return $this->jsonSuccess([
+				'collectionKey' => self::COLLECTION_KEY,
+				'exists' => false,
+				'stats' => $this->buildEmptyStats('Collection does not exist. Create it first.'),
+			]);
+		}
+	}
+
+	private function buildEmptyStats(string $note): array {
+		return [
+			'timestamp' => gmdate('Y-m-d H:i:s') . ' UTC',
+			'exists' => false,
+			'health' => [
+				'status' => null,
+				'optimizer_status' => null,
+				'segments_count' => 0,
+				'info_time_ms' => 0,
+				'note' => $note,
+			],
+			'size' => [
+				'collection' => self::COLLECTION_KEY,
+				'points_count' => 0,
+				'indexed_vectors_count' => 0,
+				'on_disk_payload' => null,
+				'shard_number' => null,
+				'replication_factor' => null,
+			],
+			'schema' => [
+				'field_count' => 0,
+				'zero_point_fields_count' => 0,
+				'expected_missing_count' => 0,
+				'top_keys_preview' => '–',
+				'note' => 'No schema available (collection missing).',
+			],
+			'config' => [
+				'vector_size' => null,
+				'distance' => null,
+				'hnsw_m' => null,
+				'hnsw_ef_construct' => null,
+				'full_scan_threshold' => null,
+				'strict_mode_enabled' => null,
+				'note' => 'No config available (collection missing).',
+			],
+			'badges' => [
+				'health' => ['state' => 'warn', 'label' => 'Missing'],
+				'size' => ['state' => 'warn', 'label' => 'Empty'],
+				'schema' => ['state' => 'warn', 'label' => 'Missing'],
+				'config' => ['state' => 'warn', 'label' => 'Missing'],
+			],
+		];
 	}
 
 	private function buildStats(array $info): array {
@@ -138,13 +223,12 @@ final class IliasVectorStoreAdminDisplay implements IAdminDisplay {
 			}
 		}
 
-		// erwartete Felder (aus deinem Pipeline-Kontext)
+		// Expected fields (based on your ingestion pipeline)
 		$expected = [
 			'content_uuid',
 			'collection_key',
 			'container_obj_id',
 			'source_kind',
-			'type',
 			'chunktoken',
 			'chunk_index',
 			'hash',
@@ -161,18 +245,16 @@ final class IliasVectorStoreAdminDisplay implements IAdminDisplay {
 			}
 		}
 
-		$topKeysPreview = '';
+		$topKeysPreview = '–';
 		if (count($nonZeroFields) > 0) {
 			$top = array_slice($nonZeroFields, 0, 6);
 			$topKeysPreview = implode(', ', $top);
 			if (count($nonZeroFields) > 6) {
 				$topKeysPreview .= ', …';
 			}
-		} else {
-			$topKeysPreview = '–';
 		}
 
-		// Badges (bewusst einfache, robuste Heuristik)
+		// Simple and robust heuristics for badges
 		$badgeHealth = ['state' => 'ok', 'label' => 'OK'];
 		if ($status !== 'green' || $optimizer !== 'ok') {
 			$badgeHealth = ['state' => 'warn', 'label' => 'Degraded'];
@@ -180,24 +262,24 @@ final class IliasVectorStoreAdminDisplay implements IAdminDisplay {
 
 		$badgeSize = ['state' => 'ok', 'label' => 'OK'];
 		if ($points <= 0) {
-			$badgeSize = ['state' => 'warn', 'label' => 'Leer'];
+			$badgeSize = ['state' => 'warn', 'label' => 'Empty'];
 		}
 
 		$badgeSchema = ['state' => 'ok', 'label' => 'OK'];
 		if (count($missingExpected) > 0) {
-			$badgeSchema = ['state' => 'warn', 'label' => 'Lücken'];
+			$badgeSchema = ['state' => 'warn', 'label' => 'Gaps'];
 		}
-		// "title points = 0" ist bei Qdrant oft normal (Text index), wir werten das nicht als err.
 
 		$badgeConfig = ['state' => 'ok', 'label' => 'OK'];
 		$vecSize = $vectors['size'] ?? null;
 		$dist = $vectors['distance'] ?? null;
 		if ((int)$vecSize !== 1024 || (string)$dist !== 'Cosine') {
-			$badgeConfig = ['state' => 'warn', 'label' => 'Abweichung'];
+			$badgeConfig = ['state' => 'warn', 'label' => 'Mismatch'];
 		}
 
 		return [
 			'timestamp' => gmdate('Y-m-d H:i:s') . ' UTC',
+			'exists' => true,
 			'health' => [
 				'status' => $status === '' ? null : $status,
 				'optimizer_status' => $optimizer === '' ? null : $optimizer,
@@ -240,40 +322,43 @@ final class IliasVectorStoreAdminDisplay implements IAdminDisplay {
 
 	private function healthNote(string $status, string $optimizer, int $timeMs): string {
 		if ($status !== 'green') {
-			return 'Qdrant meldet keinen "green" Status.';
+			return 'Qdrant does not report a "green" status.';
 		}
 		if ($optimizer !== 'ok') {
-			return 'Optimizer ist nicht OK (kann auf laufende Optimierungen oder Probleme hindeuten).';
+			return 'Optimizer is not OK (could indicate ongoing optimization or issues).';
 		}
 		if ($timeMs >= 500) {
-			return 'Info-Call ist relativ langsam (Latenz prüfen).';
+			return 'Info call is relatively slow (check latency).';
 		}
-		return 'Gesund (status=green, optimizer=ok).';
+		return 'Healthy (status=green, optimizer=ok).';
 	}
 
 	private function schemaNote(array $missingExpected, array $zeroFields): string {
 		if (count($missingExpected) > 0) {
-			return 'Fehlende erwartete Keys: ' . implode(', ', array_slice($missingExpected, 0, 6)) . (count($missingExpected) > 6 ? ', …' : '');
+			return 'Missing expected keys: ' . implode(', ', array_slice($missingExpected, 0, 6)) . (count($missingExpected) > 6 ? ', …' : '');
 		}
 
-		// zeroFields ist informational (z.B. title points=0 ist OK)
+		// zeroFields is informational (e.g. title points=0 can be normal for text indexing)
 		if (count($zeroFields) > 0) {
-			return 'Hinweis: Keys mit 0 Punkten: ' . implode(', ', array_slice($zeroFields, 0, 6)) . (count($zeroFields) > 6 ? ', …' : '');
+			return 'Note: Keys with 0 points: ' . implode(', ', array_slice($zeroFields, 0, 6)) . (count($zeroFields) > 6 ? ', …' : '');
 		}
 
-		return 'Schema vollständig und befüllt.';
+		return 'Schema looks complete and populated.';
 	}
 
 	private function configNote($vecSize, string $dist, $onDiskPayload): string {
 		$parts = [];
+
 		if ((int)$vecSize === 1024 && $dist === 'Cosine') {
-			$parts[] = 'Vector config passt.';
+			$parts[] = 'Vector config matches.';
 		} else {
-			$parts[] = 'Vector config weicht ab.';
+			$parts[] = 'Vector config differs.';
 		}
+
 		if ($onDiskPayload !== null) {
 			$parts[] = 'Payload on-disk: ' . ($onDiskPayload ? 'yes' : 'no');
 		}
+
 		return implode(' ', $parts);
 	}
 
@@ -294,13 +379,13 @@ final class IliasVectorStoreAdminDisplay implements IAdminDisplay {
 				'endpoint' => [
 					'mode' => 'config',
 					'section' => self::CONNECTION_CONFIG_SECTION,
-					'key' => 'endpoint'
+					'key' => 'endpoint',
 				],
 				'apikey' => [
 					'mode' => 'config',
 					'section' => self::CONNECTION_CONFIG_SECTION,
-					'key' => 'apikey'
-				]
+					'key' => 'apikey',
+				],
 			]);
 		}
 
@@ -310,7 +395,7 @@ final class IliasVectorStoreAdminDisplay implements IAdminDisplay {
 	private function buildEndpointBase(string $baseEndpoint): string {
 		$baseEndpoint = trim($baseEndpoint);
 
-		// fallback: typical BASE3 routing if config missing
+		// Fallback: typical BASE3 routing if config missing
 		if ($baseEndpoint === '') {
 			$baseEndpoint = 'base3.php';
 		}
@@ -320,23 +405,19 @@ final class IliasVectorStoreAdminDisplay implements IAdminDisplay {
 		return $baseEndpoint . $sep . 'name=' . rawurlencode(self::getName()) . '&out=json&action=';
 	}
 
-	private function jsonSuccess(array $data, ?callable $sideEffect = null): string {
-		if ($sideEffect) {
-			$sideEffect();
-		}
-
+	private function jsonSuccess(array $data): string {
 		return json_encode([
 			'status' => 'ok',
 			'timestamp' => gmdate('c'),
-			'data' => $data
-		], JSON_UNESCAPED_UNICODE);
+			'data' => $data,
+		], JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
 	}
 
 	private function jsonError(string $message): string {
 		return json_encode([
 			'status' => 'error',
 			'timestamp' => gmdate('c'),
-			'message' => $message
-		], JSON_UNESCAPED_UNICODE);
+			'message' => $message,
+		], JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
 	}
 }

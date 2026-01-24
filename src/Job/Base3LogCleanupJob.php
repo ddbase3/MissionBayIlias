@@ -3,6 +3,7 @@
 namespace MissionBayIlias\Job;
 
 use Base3\Worker\Api\IJob;
+use Base3\Configuration\Api\IConfiguration;
 use Base3\Database\Api\IDatabase;
 use Base3\State\Api\IStateStore;
 
@@ -36,9 +37,13 @@ final class Base3LogCleanupJob implements IJob {
 
 	// Safety cap per run (avoid long table locks; tune as needed)
 	private const DEFAULT_DELETE_BATCH = 20000;
+	private const DEFAULT_PRIORITY = 1;
+
+	private ?array $missionbayIliasConf = null;
 
 	public function __construct(
 		private readonly IDatabase $db,
+		private readonly IConfiguration $configuration,
 		private readonly IStateStore $state
 	) {}
 
@@ -47,11 +52,13 @@ final class Base3LogCleanupJob implements IJob {
 	}
 
 	public function isActive() {
-		return true;
+		$conf = $this->getMissionbayIliasConf();
+		return ((int)($conf['base3logcleanupjob.active'] ?? 0)) === 1;
 	}
 
 	public function getPriority() {
-		return 1;
+		$conf = $this->getMissionbayIliasConf();
+		return (int)($conf['base3logcleanupjob.priority'] ?? self::DEFAULT_PRIORITY);
 	}
 
 	public function go() {
@@ -79,6 +86,13 @@ final class Base3LogCleanupJob implements IJob {
 		$this->touchLastRunAt();
 
 		return 'Log cleanup done (cutoff: ' . $cutoff . ', limit: ' . $deleteBatch . ')';
+	}
+
+	private function getMissionbayIliasConf(): array {
+		if ($this->missionbayIliasConf === null) {
+			$this->missionbayIliasConf = (array)$this->configuration->get('missionbayilias');
+		}
+		return $this->missionbayIliasConf;
 	}
 
 	/* ---------- Cleanup ---------- */

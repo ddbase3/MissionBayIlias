@@ -2,12 +2,12 @@
 
 namespace MissionBayIlias\Provider;
 
-use MissionBayIlias\Api\IContentProvider;
-use MissionBayIlias\Api\ContentCursor;
-use MissionBayIlias\Api\ContentBatch;
-use MissionBayIlias\Api\ContentUnit;
-use MissionBayIlias\Api\IObjectTreeResolver;
 use Base3\Database\Api\IDatabase;
+use MissionBayIlias\Api\IContentProvider;
+use MissionBayIlias\Api\IObjectTreeResolver;
+use MissionBayIlias\Dto\ContentBatchDto;
+use MissionBayIlias\Dto\ContentCursorDto;
+use MissionBayIlias\Dto\ContentUnitDto;
 
 final class BlogContentProvider implements IContentProvider {
 
@@ -35,7 +35,7 @@ final class BlogContentProvider implements IContentProvider {
                 return self::SOURCE_KIND;
         }
 
-        public function fetchChanged(ContentCursor $cursor, int $limit): ContentBatch {
+        public function fetchChanged(ContentCursorDto $cursor, int $limit): ContentBatchDto {
                 $limit = max(1, (int)$limit);
 
                 $rows = $this->queryAll(
@@ -63,7 +63,7 @@ final class BlogContentProvider implements IContentProvider {
                 );
 
                 if (!$rows) {
-                        return new ContentBatch([], $cursor);
+                        return new ContentBatchDto([], $cursor);
                 }
 
                 $units = [];
@@ -83,7 +83,7 @@ final class BlogContentProvider implements IContentProvider {
 
                         $locator = 'blog:' . $objId;
 
-                        $units[] = new ContentUnit(
+                        $units[] = new ContentUnitDto(
                                 self::SOURCE_SYSTEM,
                                 self::SOURCE_KIND,
                                 $locator,
@@ -103,7 +103,7 @@ final class BlogContentProvider implements IContentProvider {
                         }
                 }
 
-                return new ContentBatch($units, new ContentCursor($maxTs, $maxId));
+                return new ContentBatchDto($units, new ContentCursorDto($maxTs, $maxId));
         }
 
         public function fetchMissingSourceIntIds(int $limit): array {

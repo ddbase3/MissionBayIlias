@@ -1,14 +1,14 @@
 <?php declare(strict_types=1);
 
-namespace MissionBayIlias\Api;
+namespace MissionBayIlias\Dto;
 
 /**
- * ContentCursor
+ * ContentCursorDto
  *
  * Cursor = (changed_at, changed_id) tie-breaker.
  * Serialized as "YYYY-mm-dd HH:ii:ss|<id>".
  */
-final class ContentCursor {
+final class ContentCursorDto {
 
 	public function __construct(
 		public readonly string $changedAt,

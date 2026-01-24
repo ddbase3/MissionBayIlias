@@ -2,12 +2,12 @@
 
 namespace MissionBayIlias\Provider;
 
-use MissionBayIlias\Api\IContentProvider;
-use MissionBayIlias\Api\ContentCursor;
-use MissionBayIlias\Api\ContentBatch;
-use MissionBayIlias\Api\ContentUnit;
-use MissionBayIlias\Api\IObjectTreeResolver;
 use Base3\Database\Api\IDatabase;
+use MissionBayIlias\Api\IContentProvider;
+use MissionBayIlias\Api\IObjectTreeResolver;
+use MissionBayIlias\Dto\ContentBatchDto;
+use MissionBayIlias\Dto\ContentCursorDto;
+use MissionBayIlias\Dto\ContentUnitDto;
 
 final class WikiPageContentProvider implements IContentProvider {
 
@@ -37,7 +37,7 @@ final class WikiPageContentProvider implements IContentProvider {
                 return self::SOURCE_KIND;
         }
 
-        public function fetchChanged(ContentCursor $cursor, int $limit): ContentBatch {
+        public function fetchChanged(ContentCursorDto $cursor, int $limit): ContentBatchDto {
                 $limit = max(1, (int)$limit);
 
                 $rows = $this->queryAll(
@@ -62,7 +62,7 @@ final class WikiPageContentProvider implements IContentProvider {
                 );
 
                 if (!$rows) {
-                        return new ContentBatch([], $cursor);
+                        return new ContentBatchDto([], $cursor);
                 }
 
                 $units = [];
@@ -86,7 +86,7 @@ final class WikiPageContentProvider implements IContentProvider {
 
                         $locator = 'wiki:' . $wikiObjId . ':' . $pageId;
 
-                        $units[] = new ContentUnit(
+                        $units[] = new ContentUnitDto(
                                 self::SOURCE_SYSTEM,
                                 self::SOURCE_KIND,
                                 $locator,
@@ -106,9 +106,9 @@ final class WikiPageContentProvider implements IContentProvider {
                         }
                 }
 
-                return new ContentBatch(
+                return new ContentBatchDto(
                         $units,
-                        new ContentCursor($maxTs, $maxId)
+                        new ContentCursorDto($maxTs, $maxId)
                 );
         }
 

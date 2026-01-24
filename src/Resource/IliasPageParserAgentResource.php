@@ -17,6 +17,7 @@ use MissionBay\Resource\AbstractAgentResource;
  * - wiki_page
  * - blog_posting
  * - glo_term
+ * - cat
  *
  * Critical contract:
  * - Keep AgentParsedContent->structured in the extractor "root shape"
@@ -31,6 +32,7 @@ final class IliasPageParserAgentResource extends AbstractAgentResource implement
                 'wiki_page',
                 'blog_posting',
                 'glo_term',
+                'cat',
         ];
 
         public static function getName(): string {
@@ -38,7 +40,7 @@ final class IliasPageParserAgentResource extends AbstractAgentResource implement
         }
 
         public function getDescription(): string {
-                return 'Parser for ILIAS PageObject content (wiki pages, blog postings, glossary terms): converts rendered HTML/XML to text and keeps extractor root shape for chunking.';
+                return 'Parser for ILIAS PageObject content (wiki pages, blog postings, glossary terms, categories): converts rendered HTML/XML to text and keeps extractor root shape for chunking.';
         }
 
         public function getPriority(): int {

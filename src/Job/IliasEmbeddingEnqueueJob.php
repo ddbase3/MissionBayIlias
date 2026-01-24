@@ -3,12 +3,13 @@
 namespace MissionBayIlias\Job;
 
 use Base3\Worker\Api\IJob;
+use Base3\Configuration\Api\IConfiguration;
 use Base3\Database\Api\IDatabase;
 use Base3\State\Api\IStateStore;
 use Base3\Api\IClassMap;
 use MissionBayIlias\Api\IContentProvider;
-use MissionBayIlias\Api\ContentCursor;
-use MissionBayIlias\Api\ContentUnit;
+use MissionBayIlias\Dto\ContentCursorDto;
+use MissionBayIlias\Dto\ContentUnitDto;
 
 final class IliasEmbeddingEnqueueJob implements IJob {
 
@@ -19,8 +20,14 @@ final class IliasEmbeddingEnqueueJob implements IJob {
 
         private const DEFAULT_LAST_RUN_AT = '1970-01-01 00:00:00';
 
+	private const DEFAULT_PRIORITY = 2;
+
+	private ?array $missionbayIliasConf = null;
+
         /** later config */
         private const SOURCE_KIND_WHITELIST = [
+		'cat' => true,
+		'crs' => true,
 		'blog' => true,
 		'blog_posting' => true,
 		'glo' => true,
@@ -30,7 +37,8 @@ final class IliasEmbeddingEnqueueJob implements IJob {
         ];
 
         public function __construct(
-                private readonly IDatabase $db,
+		private readonly IConfiguration $configuration,
+		private readonly IDatabase $db,
                 private readonly IStateStore $state,
                 private readonly IClassMap $classMap
         ) {}
@@ -39,13 +47,15 @@ final class IliasEmbeddingEnqueueJob implements IJob {
                 return 'iliasembeddingenqueuejob';
         }
 
-        public function isActive() {
-                return true;
-        }
+	public function isActive() {
+		$conf = $this->getMissionbayIliasConf();
+		return ((int)($conf['iliasembeddingenqueuejob.active'] ?? 0)) === 1;
+	}
 
-        public function getPriority() {
-                return 2;
-        }
+	public function getPriority() {
+		$conf = $this->getMissionbayIliasConf();
+		return (int)($conf['iliasembeddingenqueuejob.priority'] ?? self::DEFAULT_PRIORITY);
+	}
 
         public function go() {
                 $this->db->connect();
@@ -90,6 +100,13 @@ final class IliasEmbeddingEnqueueJob implements IJob {
                 return "enqueue done - changed:$changed deleted:$deleted providers:" . count($providers) . " errors:$errors";
         }
 
+	private function getMissionbayIliasConf(): array {
+		if ($this->missionbayIliasConf === null) {
+			$this->missionbayIliasConf = (array)$this->configuration->get('missionbayilias');
+		}
+		return $this->missionbayIliasConf;
+	}
+
         /* ================= Providers ================= */
 
         /**
@@ -128,7 +145,7 @@ final class IliasEmbeddingEnqueueJob implements IJob {
                 $unitByHex = [];
 
                 foreach ($units as $u) {
-                        if (!$u instanceof ContentUnit) {
+                        if (!$u instanceof ContentUnitDto) {
                                 continue;
                         }
 
@@ -319,7 +336,7 @@ final class IliasEmbeddingEnqueueJob implements IJob {
                 );
         }
 
-        private function upsertSeenFromUnit(string $cidHex, ContentUnit $u, string $version, ?string $token): void {
+        private function upsertSeenFromUnit(string $cidHex, ContentUnitDto $u, string $version, ?string $token): void {
                 $this->exec(
                         "INSERT INTO base3_embedding_seen
                                         (content_id, source_system, source_kind, source_locator, container_obj_id, source_int_id,
@@ -421,12 +438,12 @@ final class IliasEmbeddingEnqueueJob implements IJob {
 
         /* ================= Cursor / State ================= */
 
-        private function loadCursor(IContentProvider $provider): ContentCursor {
+        private function loadCursor(IContentProvider $provider): ContentCursorDto {
                 $raw = (string)$this->state->get($this->stateKeyProvider($provider, 'cursor'), '');
-                return ContentCursor::fromString($raw);
+                return ContentCursorDto::fromString($raw);
         }
 
-        private function saveCursor(IContentProvider $provider, ContentCursor $cursor): void {
+        private function saveCursor(IContentProvider $provider, ContentCursorDto $cursor): void {
                 $this->state->set($this->stateKeyProvider($provider, 'cursor'), $cursor->toString());
         }
 
