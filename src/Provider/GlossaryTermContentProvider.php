@@ -196,15 +196,12 @@ final class GlossaryTermContentProvider implements IContentProvider {
 				p.parent_type,
 				p.last_change,
 				p.created AS page_created,
-				p.active,
-				p.is_empty,
 				p.lang,
 				p.render_md5,
 				p.rendered_content,
 				p.content,
 				o.title AS glo_title,
-				o.description AS glo_description,
-				o.offline AS glo_offline
+				o.description AS glo_description
 			FROM glossary_term t
 			LEFT JOIN page_object p
 				ON p.page_id = t.id
@@ -251,14 +248,11 @@ final class GlossaryTermContentProvider implements IContentProvider {
 				'parent_type' => $this->nullIfEmpty((string)($r['parent_type'] ?? self::PARENT_TYPE)),
 				'last_change' => $this->nullIfEmpty((string)($r['last_change'] ?? '')),
 				'page_created' => $this->nullIfEmpty((string)($r['page_created'] ?? '')),
-				'active' => isset($r['active']) ? (int)$r['active'] : null,
-				'is_empty' => isset($r['is_empty']) ? (int)$r['is_empty'] : null,
 				'lang' => $this->nullIfEmpty((string)($r['lang'] ?? '')),
 				'render_md5' => $this->nullIfEmpty((string)($r['render_md5'] ?? '')),
 
 				'glo_title' => $this->nullIfEmpty((string)($r['glo_title'] ?? '')),
 				'glo_description' => $this->nullIfEmpty((string)($r['glo_description'] ?? '')),
-				'glo_offline' => isset($r['glo_offline']) ? (int)$r['glo_offline'] : null,
 			]
 		];
 	}

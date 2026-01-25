@@ -45,9 +45,6 @@ final class CourseContentProvider implements IContentProvider {
 				o.description,
 				o.last_update,
 				o.create_date,
-				o.owner,
-				o.offline,
-				o.import_id,
 				s.syllabus,
 				s.important,
 				s.period_start,
@@ -169,19 +166,10 @@ final class CourseContentProvider implements IContentProvider {
 				o.description,
 				o.last_update,
 				o.create_date,
-				o.owner,
-				o.offline,
-				o.import_id,
 				s.syllabus,
 				s.important,
 				s.contact_name,
 				s.contact_email,
-				s.activation_type,
-				s.activation_start,
-				s.activation_end,
-				s.sub_limitation_type,
-				s.sub_start,
-				s.sub_end,
 				s.period_start,
 				s.period_end
 			FROM object_data o
@@ -215,23 +203,12 @@ final class CourseContentProvider implements IContentProvider {
 			'meta' => [
 				'last_update' => trim((string)($r['last_update'] ?? '')),
 				'create_date' => trim((string)($r['create_date'] ?? '')),
-				'owner' => isset($r['owner']) ? (int)$r['owner'] : null,
-				'offline' => isset($r['offline']) ? (int)$r['offline'] : null,
-				'import_id' => trim((string)($r['import_id'] ?? '')),
 
 				// course settings meta (keep raw; parser will strip html/xml later)
 				'syllabus' => $syllabus !== '' ? $syllabus : null,
 				'important' => $important !== '' ? $important : null,
 				'contact_name' => trim((string)($r['contact_name'] ?? '')) !== '' ? trim((string)($r['contact_name'] ?? '')) : null,
 				'contact_email' => trim((string)($r['contact_email'] ?? '')) !== '' ? trim((string)($r['contact_email'] ?? '')) : null,
-
-				'activation_type' => isset($r['activation_type']) ? (int)$r['activation_type'] : null,
-				'activation_start' => isset($r['activation_start']) ? (int)$r['activation_start'] : null,
-				'activation_end' => isset($r['activation_end']) ? (int)$r['activation_end'] : null,
-
-				'sub_limitation_type' => isset($r['sub_limitation_type']) ? (int)$r['sub_limitation_type'] : null,
-				'sub_start' => isset($r['sub_start']) ? (int)$r['sub_start'] : null,
-				'sub_end' => isset($r['sub_end']) ? (int)$r['sub_end'] : null,
 
 				'period_start' => trim((string)($r['period_start'] ?? '')) !== '' ? trim((string)($r['period_start'] ?? '')) : null,
 				'period_end' => trim((string)($r['period_end'] ?? '')) !== '' ? trim((string)($r['period_end'] ?? '')) : null,

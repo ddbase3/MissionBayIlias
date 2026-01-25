@@ -153,12 +153,8 @@ final class WikiContentProvider implements IContentProvider {
                                 o.description,
                                 o.last_update,
                                 o.create_date,
-                                o.owner,
-                                o.offline,
-                                o.import_id,
                                 w.startpage,
-                                w.introduction,
-                                w.is_online
+                                w.introduction
                         FROM object_data o
                         LEFT JOIN il_wiki_data w ON w.id = o.obj_id
                         WHERE o.obj_id = " . (int)$objId . "
@@ -183,12 +179,8 @@ final class WikiContentProvider implements IContentProvider {
                         'content' => trim((string)($r['introduction'] ?? '')),
                         'meta' => [
                                 'startpage' => trim((string)($r['startpage'] ?? '')),
-                                'is_online' => isset($r['is_online']) ? (int)$r['is_online'] : null,
                                 'last_update' => trim((string)($r['last_update'] ?? '')),
                                 'create_date' => trim((string)($r['create_date'] ?? '')),
-                                'owner' => isset($r['owner']) ? (int)$r['owner'] : null,
-                                'offline' => isset($r['offline']) ? (int)$r['offline'] : null,
-                                'import_id' => trim((string)($r['import_id'] ?? '')),
                         ]
                 ];
         }

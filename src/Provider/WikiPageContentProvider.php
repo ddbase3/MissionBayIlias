@@ -159,8 +159,6 @@ final class WikiPageContentProvider implements IContentProvider {
                                 p.parent_id AS wiki_obj_id,
                                 p.last_change,
                                 p.created,
-                                p.active,
-                                p.is_empty,
                                 p.lang,
                                 p.render_md5,
                                 p.rendered_content,
@@ -200,8 +198,6 @@ final class WikiPageContentProvider implements IContentProvider {
                         'meta' => [
                                 'last_change' => trim((string)($r['last_change'] ?? '')),
                                 'created' => trim((string)($r['created'] ?? '')),
-                                'active' => isset($r['active']) ? (int)$r['active'] : null,
-                                'is_empty' => isset($r['is_empty']) ? (int)$r['is_empty'] : null,
                                 'lang' => trim((string)($r['lang'] ?? '')),
                                 'page_lang' => trim((string)($r['page_lang'] ?? '')),
                                 'render_md5' => trim((string)($r['render_md5'] ?? '')),

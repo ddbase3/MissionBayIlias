@@ -55,10 +55,7 @@ final class GlossaryContentProvider implements IContentProvider {
 				o.title,
 				o.description,
 				o.last_update,
-				o.create_date,
-				o.owner,
-				o.offline,
-				o.import_id
+				o.create_date
 			FROM object_data o
 			WHERE o.type = 'glo'
 				AND o.last_update IS NOT NULL
@@ -159,10 +156,7 @@ final class GlossaryContentProvider implements IContentProvider {
 				o.title,
 				o.description,
 				o.last_update,
-				o.create_date,
-				o.owner,
-				o.offline,
-				o.import_id
+				o.create_date
 			FROM object_data o
 			WHERE o.obj_id = " . (int)$objId . "
 				AND o.type = 'glo'
@@ -184,9 +178,6 @@ final class GlossaryContentProvider implements IContentProvider {
 			'meta' => [
 				'last_update' => $this->nullIfEmpty((string)($r['last_update'] ?? '')),
 				'create_date' => $this->nullIfEmpty((string)($r['create_date'] ?? '')),
-				'owner' => isset($r['owner']) ? (int)$r['owner'] : null,
-				'offline' => isset($r['offline']) ? (int)$r['offline'] : null,
-				'import_id' => $this->nullIfEmpty((string)($r['import_id'] ?? '')),
 			]
 		];
 	}
