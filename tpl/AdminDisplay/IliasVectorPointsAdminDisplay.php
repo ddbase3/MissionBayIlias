@@ -166,7 +166,7 @@
 /* Sample cards */
 .vp-grid {
 	display: grid;
-	grid-template-columns: repeat(3, minmax(0, 1fr));
+	grid-template-columns: repeat(2, minmax(0, 1fr));
 	gap: 12px;
 }
 
@@ -178,7 +178,7 @@
 
 .vp-card {
 	border: 1px solid #ddd;
-	border-radius: 8px;
+	border-radius: 10px;
 	background: #fff;
 	padding: 12px;
 	display: flex;
@@ -200,6 +200,7 @@
 	overflow: hidden;
 	text-overflow: ellipsis;
 	white-space: nowrap;
+	min-width: 0;
 }
 
 .vp-badge {
@@ -212,6 +213,13 @@
 	white-space: nowrap;
 }
 
+.vp-section-title {
+	font-size: 12px;
+	font-weight: bold;
+	color: #555;
+	margin-bottom: 6px;
+}
+
 .vp-kv {
 	font-family: Consolas, monospace;
 	font-size: 12px;
@@ -220,23 +228,26 @@
 	color: #222;
 }
 
-.vp-text {
-	border-top: 1px dashed #ddd;
-	padding-top: 10px;
-	font-size: 12px;
-	color: #333;
-	white-space: pre-wrap;
-	line-height: 1.35;
-	max-height: 220px;
-	overflow: auto;
+.vp-box {
+	border: 1px solid #eee;
+	border-radius: 8px;
+	padding: 10px;
+	background: #fafafa;
+	min-width: 0;
+	overflow-x: hidden;
 }
 
-details summary {
-	cursor: pointer;
-	user-select: none;
-	font-weight: bold;
-	color: #555;
-	margin-top: 6px;
+.vp-top {
+	height: 150px;
+}
+
+.vp-mid {
+	height: 300px;
+	background: #fff;
+}
+
+.vp-bot {
+	height: 150px;
 }
 </style>
 
@@ -266,10 +277,33 @@ function vpEsc(s) {
 	}[c]));
 }
 
-function vpShortText(text, max = 600) {
-	text = String(text ?? "");
-	if (text.length <= max) return text;
-	return text.slice(0, max) + " …";
+function vpPretty(obj) {
+	try {
+		return JSON.stringify(obj, null, 2);
+	} catch (e) {
+		return String(obj ?? "");
+	}
+}
+
+function vpPayloadTop(payload) {
+	if (!payload || typeof payload !== "object") return {};
+	const out = {};
+	for (const k of Object.keys(payload)) {
+		if (k === "text") continue;
+		if (k === "meta") continue;
+		out[k] = payload[k];
+	}
+	return out;
+}
+
+function vpPayloadMeta(payload) {
+	const meta = payload && typeof payload === "object" ? payload.meta : null;
+	return meta && typeof meta === "object" ? meta : {};
+}
+
+function vpPayloadText(payload) {
+	const t = payload && typeof payload === "object" ? payload.text : "";
+	return String(t ?? "");
 }
 
 function vpRenderPoints(points) {
@@ -287,16 +321,13 @@ function vpRenderPoints(points) {
 		const id = p && p.id ? p.id : "–";
 
 		const title = payload.title || payload.source_locator || payload.content_uuid || id;
-
-		const meta = payload.meta || {};
 		const sk = payload.source_kind || "–";
-		const cu = payload.content_uuid || "–";
-		const loc = payload.source_locator || "–";
-		const cont = payload.container_obj_id ?? "–";
-		const idx = payload.chunk_index ?? "–";
-		const tok = payload.chunktoken || "–";
 
-		const text = payload.text || "";
+		const top = vpPayloadTop(payload);
+		top.id = id; // make id visible in the "top" section as well
+
+		const text = vpPayloadText(payload);
+		const meta = vpPayloadMeta(payload);
 
 		const el = document.createElement("div");
 		el.className = "vp-card";
@@ -305,19 +336,21 @@ function vpRenderPoints(points) {
 				"<div class='vp-title' title='" + vpEsc(title) + "'>" + vpEsc(title) + "</div>" +
 				"<div class='vp-badge'>" + vpEsc(sk) + "</div>" +
 			"</div>" +
-			"<div class='vp-kv'>" +
-				"id: " + vpEsc(id) + "\n" +
-				"content_uuid: " + vpEsc(cu) + "\n" +
-				"source_locator: " + vpEsc(loc) + "\n" +
-				"container_obj_id: " + vpEsc(cont) + "\n" +
-				"chunk_index: " + vpEsc(idx) + "\n" +
-				"chunktoken: " + vpEsc(tok) +
+
+			"<div class='vp-box vp-top'>" +
+				"<div class='vp-section-title'>payload (root, without text/meta)</div>" +
+				"<div class='vp-kv'>" + vpEsc(vpPretty(top)) + "</div>" +
 			"</div>" +
-			"<div class='vp-text'>" + vpEsc(vpShortText(text)) + "</div>" +
-			"<details>" +
-				"<summary>payload.meta</summary>" +
-				"<div class='vp-kv'>" + vpEsc(JSON.stringify(meta, null, 2)) + "</div>" +
-			"</details>";
+
+			"<div class='vp-box vp-mid'>" +
+				"<div class='vp-section-title'>text (full)</div>" +
+				"<div class='vp-kv'>" + vpEsc(text) + "</div>" +
+			"</div>" +
+
+			"<div class='vp-box vp-bot'>" +
+				"<div class='vp-section-title'>payload.meta (full)</div>" +
+				"<div class='vp-kv'>" + vpEsc(vpPretty(meta)) + "</div>" +
+			"</div>";
 
 		grid.appendChild(el);
 	}
@@ -341,7 +374,7 @@ async function vpLoadKinds() {
 		const kinds = (json.data && json.data.kinds) ? json.data.kinds : [];
 		const sel = document.getElementById("vp-sourcekind");
 
-		// keep first "(alle)"
+		// Keep first "(alle)"
 		while (sel.options.length > 1) sel.remove(1);
 
 		for (const k of kinds) {
@@ -351,7 +384,7 @@ async function vpLoadKinds() {
 			sel.appendChild(opt);
 		}
 
-		// auto load initial samples
+		// Auto-load initial samples
 		await vpLoadSamples();
 
 	} catch (e) {
@@ -383,7 +416,7 @@ async function vpLoadSamples() {
 		const points = (json.data && json.data.points) ? json.data.points : [];
 		vpRenderPoints(points);
 
-		// debug output hidden by default; enable if needed:
+		// Debug output hidden by default; enable if needed:
 		// vpPrint(json, "success");
 
 	} catch (e) {
@@ -393,6 +426,6 @@ async function vpLoadSamples() {
 	vpSetLoading(false);
 }
 
-// init
+// Init
 vpLoadKinds();
 </script>

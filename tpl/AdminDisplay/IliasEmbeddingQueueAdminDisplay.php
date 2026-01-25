@@ -11,7 +11,7 @@
 
 		<label class="q-autorefresh">
 			<input type="checkbox" id="q-autorefresh" checked onchange="qToggleAutoRefresh()">
-			Auto-Refresh (15s)
+			Auto-Refresh (3s)
 		</label>
 
 		<label id="q-loading">Bitte warten…</label>
@@ -504,7 +504,7 @@
 		}
 
 		if (enabled) {
-			qTimer = setInterval(qRefresh, 15000);
+			qTimer = setInterval(qRefresh, 3000);
 		}
 	}
 

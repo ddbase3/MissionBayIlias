@@ -255,7 +255,6 @@ final class IliasVectorPointsAdminDisplay implements IAdminDisplay {
 			throw new \RuntimeException('Invalid JSON from Qdrant proxy. HTTP ' . $code . ' Body: ' . substr((string)$raw, 0, 2000));
 		}
 
-		// Qdrant proxy typically wraps errors; still handle HTTP status
 		if ($code >= 400) {
 			$msg = $data['status'] ?? null;
 			throw new \RuntimeException('Qdrant error HTTP ' . $code . ($msg ? (': ' . $msg) : ''));

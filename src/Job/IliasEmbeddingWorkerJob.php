@@ -82,7 +82,7 @@ final class IliasEmbeddingWorkerJob implements IJob {
 
 	private function getMissionbayIliasConf(): array {
 		if ($this->missionbayIliasConf === null) {
-			$this->missionbayIliasConf = (array)$this->configuration->get('missionbayilias');
+			$this->missionbayIliasConf = (array)$this->configuration->get('job');
 		}
 		return $this->missionbayIliasConf;
 	}
