@@ -24,19 +24,12 @@ final class IliasEmbeddingEnqueueJob implements IJob {
 	private const BULK_DELETE_BATCH = 5000;
 	private const STATE_BULK_DELETE_AFTER_HEX = 'bulk_delete_after_hex';
 
-	private ?array $missionbayIliasConf = null;
+	private const CONFIG_JOB_GROUP = 'job';
+	private const CONFIG_ENQUEUE_KIND_GROUP = 'enqueuesourcekind';
 
-	/** later config */
-	private const SOURCE_KIND_WHITELIST = [
-		'cat' => false,
-		'crs' => false,
-		'blog' => false,
-		'blog_posting' => false,
-		'glo' => false,
-		'glo_term' => false,
-		'wiki' => true,
-		'wiki_page' => true,
-	];
+	private const DEFAULT_ENQUEUE_KIND_ACTIVE = false;
+
+	private ?array $missionbayIliasConf = null;
 
 	public function __construct(
 		private readonly IConfiguration $configuration,
@@ -115,7 +108,7 @@ final class IliasEmbeddingEnqueueJob implements IJob {
 
 	private function getMissionbayIliasConf(): array {
 		if ($this->missionbayIliasConf === null) {
-			$this->missionbayIliasConf = (array)$this->configuration->get('job');
+			$this->missionbayIliasConf = (array)$this->configuration->get(self::CONFIG_JOB_GROUP);
 		}
 		return $this->missionbayIliasConf;
 	}
@@ -151,8 +144,8 @@ final class IliasEmbeddingEnqueueJob implements IJob {
 			}
 		}
 
-		// Also include whitelist keys, so toggles can act even without a provider instance.
-		foreach (array_keys(self::SOURCE_KIND_WHITELIST) as $k) {
+		// Also include configured keys, so toggles can act even without a provider instance.
+		foreach ($this->getConfiguredKinds() as $k) {
 			$kinds[$k] = true;
 		}
 
@@ -674,10 +667,56 @@ final class IliasEmbeddingEnqueueJob implements IJob {
 		$this->state->set($key, '');
 	}
 
-	/* ================= Whitelist ================= */
+	/* ================= Kind config ================= */
+
+	/**
+	 * Returns all configured kinds (from [enqueuesourcekind]) for which an ".active" key exists.
+	 *
+	 * @return string[]
+	 */
+	private function getConfiguredKinds(): array {
+		$group = (array)$this->configuration->get(self::CONFIG_ENQUEUE_KIND_GROUP);
+
+		$kinds = [];
+		foreach ($group as $k => $v) {
+			$k = (string)$k;
+			if ($k === '') continue;
+
+			if (str_ends_with($k, '.active')) {
+				$kind = substr($k, 0, -7);
+				$kind = $this->normalizeKind($kind);
+				if ($kind !== '') {
+					$kinds[$kind] = true;
+				}
+			}
+		}
+
+		$keys = array_keys($kinds);
+		sort($keys, SORT_STRING);
+		return $keys;
+	}
+
+	private function normalizeKind(string $s): string {
+		$s = trim($s);
+		$s = strtolower($s);
+		$s = preg_replace('/[^a-z0-9._-]+/', '', $s) ?? '';
+		return $s;
+	}
+
+	/* ================= Whitelist (now config-driven) ================= */
 
 	private function isWhitelisted(string $kind): bool {
-		return isset(self::SOURCE_KIND_WHITELIST[$kind]) && self::SOURCE_KIND_WHITELIST[$kind] === true;
+		$kind = $this->normalizeKind($kind);
+		if ($kind === '') return false;
+
+		$key = $kind . '.active';
+
+		// Default OFF if missing
+		if (!$this->configuration->hasValue(self::CONFIG_ENQUEUE_KIND_GROUP, $key)) {
+			return self::DEFAULT_ENQUEUE_KIND_ACTIVE;
+		}
+
+		return $this->configuration->getBool(self::CONFIG_ENQUEUE_KIND_GROUP, $key, self::DEFAULT_ENQUEUE_KIND_ACTIVE);
 	}
 
 	/* ================= Schema ================= */
