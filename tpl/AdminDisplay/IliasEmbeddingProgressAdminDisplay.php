@@ -1,3 +1,5 @@
+<?php $this->loadBricks('SourceKinds'); ?>
+
 <div class="base3ilias-ep1">
 	<div class="ep1-head">
 		<h3>ILIAS Embedding Progress – by source_kind</h3>
@@ -218,6 +220,7 @@
 
 <script>
 	const EP1_ENDPOINT = <?php echo json_encode((string)$this->_['endpoint']); ?>;
+	const SOURCE_KINDS = <?php echo json_encode($this->_['bricks']['sourcekinds'] ?? []); ?>;
 
 	let ep1Timer = null;
 
@@ -280,7 +283,7 @@
 		let html = "";
 
 		for (const it of items) {
-			const kind = String(it.source_kind || "–");
+			const kind = String(SOURCE_KINDS[it.source_kind] || it.source_kind || "–");
 			const total = Number(it.total || 0);
 			const segs = Array.isArray(it.segments) ? it.segments : [];
 

@@ -1,4 +1,7 @@
-<?php $this->loadBricks('IliasSourceKindEnqueueAdminDisplay'); ?>
+<?php
+	$this->loadBricks('IliasSourceKindEnqueueAdminDisplay');
+	$this->loadBricks('SourceKinds');
+?>
 
 <div class="jobs-admin">
 	<h3><?php echo $this->_['bricks']['iliassourcekindenqueueadmindisplay']['headline']; ?></h3>
@@ -189,6 +192,7 @@
 
 <script>
 const JA_ENDPOINT = <?php echo json_encode((string)$this->_['endpoint']); ?>;
+const SOURCE_KINDS = <?php echo json_encode($this->_['bricks']['sourcekinds'] ?? []); ?>;
 
 function jaSetLoading(state) {
 	document.getElementById("ja-loading").style.display = state ? "block" : "none";
@@ -232,9 +236,10 @@ function jaRenderRows(rows) {
 	for (const row of rows) {
 		const tr = document.createElement("tr");
 		const checked = row.active ? "checked" : "";
+		const kindName = SOURCE_KINDS[row.kind] || row.kind;
 
 		tr.innerHTML =
-			"<td class='job-col' title='" + jaEsc(row.kind) + "'>" + jaEsc(row.kind) + "</td>" +
+			"<td class='job-col' title='" + jaEsc(kindName) + "'>" + jaEsc(kindName) + "</td>" +
 			"<td>" +
 				"<label class='switch' title='Toggle active'>" +
 					"<input type='checkbox' data-action='active' data-kind='" + jaEsc(row.kind) + "' " + checked + ">" +
