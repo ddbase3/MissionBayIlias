@@ -220,6 +220,40 @@
 	margin-bottom: 6px;
 }
 
+/* Collapsible section header (top/bot only) */
+.vp-sec-head {
+	display: flex;
+	align-items: center;
+	justify-content: space-between;
+	gap: 10px;
+	margin-bottom: 6px;
+}
+
+.vp-sec-title {
+	font-size: 12px;
+	font-weight: bold;
+	color: #555;
+	min-width: 0;
+}
+
+.vp-toggle {
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+	width: 18px;
+	height: 18px;
+	line-height: 18px;
+	font-size: 12px;
+	color: #555;
+	cursor: pointer;
+	user-select: none;
+	border-radius: 6px;
+}
+
+.vp-toggle:hover {
+	background: #f0f0f0;
+}
+
 .vp-kv {
 	font-family: Consolas, monospace;
 	font-size: 12px;
@@ -238,7 +272,8 @@
 }
 
 .vp-top {
-	height: 150px;
+	height: 40px; /* minimal when collapsed */
+	overflow: hidden;
 }
 
 .vp-mid {
@@ -247,7 +282,26 @@
 }
 
 .vp-bot {
-	height: 150px;
+	height: 40px; /* minimal when collapsed */
+	overflow: hidden;
+}
+
+/* Expand on demand */
+.vp-box.is-open {
+	height: auto;
+	overflow: visible;
+}
+
+/* Make collapsed boxes look like "header bars" */
+.vp-box.is-collapsed .vp-kv {
+	opacity: 0.95;
+}
+
+/* Prevent layout jumps in header line */
+.vp-sec-head .vp-sec-title {
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
 }
 </style>
 
@@ -306,6 +360,19 @@ function vpPayloadText(payload) {
 	return String(t ?? "");
 }
 
+function vpToggleBox(toggleEl) {
+	const box = toggleEl.closest(".vp-box");
+	if (!box) return;
+
+	const open = !box.classList.contains("is-open");
+	box.classList.toggle("is-open", open);
+	box.classList.toggle("is-collapsed", !open);
+
+	// caret: closed ▶, open ▼
+	toggleEl.textContent = open ? "▼" : "▶";
+	toggleEl.setAttribute("aria-expanded", open ? "true" : "false");
+}
+
 function vpRenderPoints(points) {
 	const grid = document.getElementById("vp-grid");
 	grid.innerHTML = "";
@@ -324,7 +391,7 @@ function vpRenderPoints(points) {
 		const sk = payload.source_kind || "–";
 
 		const top = vpPayloadTop(payload);
-		top.id = id; // make id visible in the "top" section as well
+		top.id = id;
 
 		const text = vpPayloadText(payload);
 		const meta = vpPayloadMeta(payload);
@@ -337,8 +404,11 @@ function vpRenderPoints(points) {
 				"<div class='vp-badge'>" + vpEsc(sk) + "</div>" +
 			"</div>" +
 
-			"<div class='vp-box vp-top'>" +
-				"<div class='vp-section-title'>payload (root, without text/meta)</div>" +
+			"<div class='vp-box vp-top is-collapsed'>" +
+				"<div class='vp-sec-head'>" +
+					"<div class='vp-sec-title'>payload (root, without text/meta)</div>" +
+					"<span class='vp-toggle' role='button' tabindex='0' aria-label='Toggle payload root' aria-expanded='false'>▶</span>" +
+				"</div>" +
 				"<div class='vp-kv'>" + vpEsc(vpPretty(top)) + "</div>" +
 			"</div>" +
 
@@ -347,12 +417,29 @@ function vpRenderPoints(points) {
 				"<div class='vp-kv'>" + vpEsc(text) + "</div>" +
 			"</div>" +
 
-			"<div class='vp-box vp-bot'>" +
-				"<div class='vp-section-title'>payload.meta (full)</div>" +
+			"<div class='vp-box vp-bot is-collapsed'>" +
+				"<div class='vp-sec-head'>" +
+					"<div class='vp-sec-title'>payload.meta (full)</div>" +
+					"<span class='vp-toggle' role='button' tabindex='0' aria-label='Toggle payload meta' aria-expanded='false'>▶</span>" +
+				"</div>" +
 				"<div class='vp-kv'>" + vpEsc(vpPretty(meta)) + "</div>" +
 			"</div>";
 
 		grid.appendChild(el);
+	}
+
+	// bind toggle handlers (click + keyboard)
+	for (const t of grid.querySelectorAll(".vp-toggle")) {
+		t.addEventListener("click", (e) => {
+			e.preventDefault();
+			vpToggleBox(t);
+		});
+		t.addEventListener("keydown", (e) => {
+			if (e.key === "Enter" || e.key === " ") {
+				e.preventDefault();
+				vpToggleBox(t);
+			}
+		});
 	}
 }
 
@@ -374,7 +461,6 @@ async function vpLoadKinds() {
 		const kinds = (json.data && json.data.kinds) ? json.data.kinds : [];
 		const sel = document.getElementById("vp-sourcekind");
 
-		// Keep first "(alle)"
 		while (sel.options.length > 1) sel.remove(1);
 
 		for (const k of kinds) {
@@ -384,7 +470,6 @@ async function vpLoadKinds() {
 			sel.appendChild(opt);
 		}
 
-		// Auto-load initial samples
 		await vpLoadSamples();
 
 	} catch (e) {
@@ -415,9 +500,6 @@ async function vpLoadSamples() {
 
 		const points = (json.data && json.data.points) ? json.data.points : [];
 		vpRenderPoints(points);
-
-		// Debug output hidden by default; enable if needed:
-		// vpPrint(json, "success");
 
 	} catch (e) {
 		vpPrint("Anfrage fehlgeschlagen:\n" + e, "error");

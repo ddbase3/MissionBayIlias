@@ -63,18 +63,15 @@ final class IliasAgentRagPayloadNormalizer implements IAgentRagPayloadNormalizer
 
 			'chunktoken' => ['type' => 'keyword', 'index' => true],
 			'chunk_index' => ['type' => 'integer', 'index' => true],
+			'num_chunks' => ['type' => 'integer', 'index' => false],
 
-			'content_id_hex' => ['type' => 'keyword', 'index' => false],
 			'source_kind' => ['type' => 'keyword', 'index' => true],
-
 			'source_locator' => ['type' => 'keyword', 'index' => false],
 			'container_obj_id' => ['type' => 'integer', 'index' => true],
 			'source_int_id' => ['type' => 'integer', 'index' => false],
 
-			'num_chunks' => ['type' => 'integer', 'index' => false],
 			'read_roles' => ['type' => 'integer', 'index' => true],
 			'mount_ref_ids' => ['type' => 'integer', 'index' => true],
-
 			'ancestor_ref_ids' => ['type' => 'integer', 'index' => true],
 
 			'title' => ['type' => 'text', 'index' => true],
