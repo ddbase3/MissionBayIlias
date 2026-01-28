@@ -107,7 +107,7 @@ final class IliasEmbeddingQueueAdminDisplay implements IAdminDisplay {
 		");
 
 		$lastErrorMessage = (string)$this->scalar("
-			SELECT IFNULL(SUBSTRING(error_message, 1, 120), '')
+			SELECT IFNULL(SUBSTRING(error_message, 1, 200), '')
 			FROM base3_embedding_job
 			WHERE state='error'
 			ORDER BY updated_at DESC

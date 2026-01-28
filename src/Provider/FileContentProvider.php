@@ -65,11 +65,11 @@ final class FileContentProvider implements IContentProvider {
 			WHERE o.type = 'file'
 			  AND o.last_update IS NOT NULL
 			  AND (
-				o.last_update > '" . $this->esc($sinceTs) . "'
-				OR (
-					o.last_update = '" . $this->esc($sinceTs) . "'
-					AND o.obj_id > " . (int)$sinceId . "
-				)
+					o.last_update > '" . $this->esc($sinceTs) . "'
+					OR (
+						o.last_update = '" . $this->esc($sinceTs) . "'
+						AND o.obj_id > " . (int)$sinceId . "
+					)
 			  )
 			ORDER BY o.last_update ASC, o.obj_id ASC
 			LIMIT " . $limit
@@ -162,7 +162,11 @@ final class FileContentProvider implements IContentProvider {
 	}
 
 	public function fetchContent(string $sourceLocator, ?int $containerObjId, ?int $sourceIntId): array {
+		// Prefer the original obj_id (object_data) from containerObjId, then sourceIntId, then locator
 		$objId = $containerObjId !== null ? (int)$containerObjId : (int)($sourceIntId ?? 0);
+		if ($objId <= 0) {
+			$objId = $this->parseObjIdFromLocator($sourceLocator);
+		}
 		if ($objId <= 0) {
 			return [];
 		}
@@ -193,14 +197,14 @@ final class FileContentProvider implements IContentProvider {
 		$fileName = trim((string)($r['file_name'] ?? ''));
 		$rid = trim((string)($r['rid'] ?? ''));
 
-		$refIds = \ilObject::_getAllReferences((int)$r['obj_id']);
-		$firstRefId = (int)($refIds[0] ?? 0);
+		// Safe ref_id resolution: same strategy as CategoryContentProvider (via object tree resolver).
+		$refId = $this->getFirstRefIdByObjId((int)($r['obj_id'] ?? 0));
 
-		// Your requested behavior: minimal overhead (read + getFile), no binary load here.
+		// Minimal overhead (read + getFile), no binary load here.
 		$filePath = null;
 
 		try {
-			$fileObj = new \ilObjFile((int)$r['obj_id'], false);
+			$fileObj = new \ilObjFile((int)($r['obj_id'] ?? 0), false);
 			$fileObj->read();
 
 			$path = $fileObj->getFile();
@@ -213,7 +217,7 @@ final class FileContentProvider implements IContentProvider {
 
 		return [
 			'type' => 'file',
-			'obj_id' => (int)$r['obj_id'],
+			'obj_id' => (int)($r['obj_id'] ?? 0),
 			'source_locator' => $sourceLocator,
 			'title' => $title,
 			'description' => trim((string)($r['description'] ?? '')),
@@ -226,8 +230,8 @@ final class FileContentProvider implements IContentProvider {
 				'location' => $filePath,
 				'file_path' => $filePath,
 
-				// for direct link
-				'ref_id' => $firstRefId > 0 ? $firstRefId : null,
+				// for direct link (stable/safe like CategoryContentProvider)
+				'ref_id' => $refId > 0 ? $refId : null,
 
 				'last_update' => trim((string)($r['last_update'] ?? '')) ?: null,
 				'create_date' => trim((string)($r['create_date'] ?? '')) ?: null
@@ -237,6 +241,9 @@ final class FileContentProvider implements IContentProvider {
 
 	public function fetchReadRoles(string $sourceLocator, ?int $containerObjId, ?int $sourceIntId): array {
 		$objId = $containerObjId !== null ? (int)$containerObjId : (int)($sourceIntId ?? 0);
+		if ($objId <= 0) {
+			$objId = $this->parseObjIdFromLocator($sourceLocator);
+		}
 		if ($objId <= 0) {
 			return [];
 		}
@@ -281,19 +288,56 @@ final class FileContentProvider implements IContentProvider {
 	public function getDirectLink(string $sourceLocator, ?int $containerObjId, ?int $sourceIntId): string {
 		$objId = $containerObjId !== null ? (int)$containerObjId : (int)($sourceIntId ?? 0);
 		if ($objId <= 0) {
+			$objId = $this->parseObjIdFromLocator($sourceLocator);
+		}
+		if ($objId <= 0) {
 			return '';
 		}
 
-		$refIds = \ilObject::_getAllReferences($objId);
-		$refId = (int)($refIds[0] ?? 0);
+		// Safe ref_id resolution: same as CategoryContentProvider
+		$refId = $this->getFirstRefIdByObjId($objId);
 		if ($refId <= 0) {
 			return '';
 		}
 
+		// Example: goto.php/file/12345 (ref_id)
 		return 'goto.php/file/' . $refId;
 	}
 
 	/* ---------- Helpers ---------- */
+
+	private function parseObjIdFromLocator(string $locator): int {
+		$p = explode(':', trim($locator));
+		if (($p[0] ?? '') === 'file') {
+			return (int)($p[1] ?? 0);
+		}
+		return 0;
+	}
+
+	private function getFirstRefIdByObjId(int $objId): int {
+		if ($objId <= 0) {
+			return 0;
+		}
+
+		// Primary path: object tree resolver (same contract used by CategoryContentProvider).
+		try {
+			$refIds = $this->objectTreeResolver->getRefIdsByObjId($objId);
+			$refId = (int)($refIds[0] ?? 0);
+			if ($refId > 0) {
+				return $refId;
+			}
+		} catch (\Throwable) {
+			// ignore and try fallback
+		}
+
+		// Fallback: direct ILIAS API (keeps behavior working even if resolver is not available for some reason).
+		try {
+			$refIds = \ilObject::_getAllReferences($objId);
+			return (int)($refIds[0] ?? 0);
+		} catch (\Throwable) {
+			return 0;
+		}
+	}
 
 	private function isValidTimestamp(string $ts): bool {
 		$ts = trim($ts);

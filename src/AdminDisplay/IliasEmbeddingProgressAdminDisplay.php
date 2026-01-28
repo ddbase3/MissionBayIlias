@@ -168,7 +168,7 @@ final class IliasEmbeddingProgressAdminDisplay implements IAdminDisplay {
 			GROUP BY source_kind, bucket
 		");
 
-		$bucketOrder = ['pending_delete', 'pending_upsert', 'running', 'error', 'done'];
+		$bucketOrder = ['done', 'error', 'running', 'pending_upsert', 'pending_delete'];
 
 		$byKind = [];
 		foreach ($rows as $r) {
@@ -224,11 +224,11 @@ final class IliasEmbeddingProgressAdminDisplay implements IAdminDisplay {
 		return [
 			'timestamp' => gmdate('Y-m-d H:i:s') . ' UTC',
 			'legend' => [
-				['bucket' => 'pending_delete', 'label' => 'pending delete', 'color' => '#f08c00'],
-				['bucket' => 'pending_upsert', 'label' => 'pending upsert', 'color' => '#9aa3ad'],
-				['bucket' => 'running', 'label' => 'running', 'color' => '#2f7dd1'],
-				['bucket' => 'error', 'label' => 'error', 'color' => '#d64545'],
 				['bucket' => 'done', 'label' => 'done', 'color' => '#2f9e44'],
+				['bucket' => 'error', 'label' => 'error', 'color' => '#d64545'],
+				['bucket' => 'running', 'label' => 'running', 'color' => '#2f7dd1'],
+				['bucket' => 'pending_upsert', 'label' => 'pending upsert', 'color' => '#9aa3ad'],
+				['bucket' => 'pending_delete', 'label' => 'pending delete', 'color' => '#f08c00'],
 			],
 			'items' => $items,
 		];
