@@ -2,7 +2,7 @@
 	"nodes": [
 		{ "id": "embedding", "type": "aiembeddingnode", "docks": {
 			"extractor": [ "extractor" ],
-			"parser": [ "pageparser", "courseparser", "parser" ],
+			"parser": [ "fileparser", "pageparser", "courseparser", "parser" ],
 			"chunker": [ "chunker" ],
 			"embedder": [ "embeddingcache" ],
 			"vectordb": [ "vectordb" ],
@@ -15,9 +15,15 @@
 	],
 	"resources": [
 		{ "id": "extractor", "type": "iliasembeddingqueueextractoragentresource", "config": {
-			"claim_limit": { "mode": "fixed", "value": 5 }
+			"claim_limit": { "mode": "fixed", "value": 1 }
 		}},
 
+		{ "id": "fileparser", "type": "iliasfileunstructuredparseragentresource", "config": {
+			"endpoint": { "mode": "config", "section": "base3unstructured", "key": "endpoint" },
+			"apikey": { "mode": "config", "section": "base3unstructured", "key": "apikey" },
+			"timeout_seconds": { "mode": "fixed", "value": 90 },
+			"max_bytes": { "mode": "fixed", "value": 0 }
+		}},
 		{ "id": "pageparser", "type": "iliaspageparseragentresource" },
 		{ "id": "courseparser", "type": "iliascourseparseragentresource" },
 		{ "id": "parser", "type": "structuredobjectparseragentresource" },
