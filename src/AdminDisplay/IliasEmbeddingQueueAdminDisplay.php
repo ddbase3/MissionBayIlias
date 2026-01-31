@@ -25,12 +25,12 @@ final class IliasEmbeddingQueueAdminDisplay implements IAdminDisplay {
 		// no-op
 	}
 
-	public function getHelp() {
+	public function getHelp(): string {
 		return 'ILIAS embedding queue overview (4 cards + last 10 jobs).';
 	}
 
-	public function getOutput($out = 'html') {
-		$out = strtolower((string)$out);
+	public function getOutput(string $out = 'html', bool $final = false): string {
+		$out = strtolower($out);
 
 		if ($out === 'json') {
 			return $this->handleJson();

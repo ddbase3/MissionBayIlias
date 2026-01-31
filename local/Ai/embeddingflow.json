@@ -15,7 +15,7 @@
 	],
 	"resources": [
 		{ "id": "extractor", "type": "iliasembeddingqueueextractoragentresource", "config": {
-			"claim_limit": { "mode": "fixed", "value": 1 }
+			"claim_limit": { "mode": "fixed", "value": 3 }
 		}},
 
 		{ "id": "fileparser", "type": "iliasfileunstructuredparseragentresource", "config": {

@@ -35,12 +35,12 @@ final class IliasVectorStoreAdminDisplay implements IAdminDisplay {
 		// No-op (can be used later for embedding into other UIs)
 	}
 
-	public function getHelp() {
+	public function getHelp(): string {
 		return 'ILIAS VectorStore admin display (html UI + json endpoint).';
 	}
 
-	public function getOutput($out = 'html') {
-		$out = strtolower((string)$out);
+	public function getOutput(string $out = 'html', bool $final = false): string {
+		$out = strtolower($out);
 
 		if ($out === 'json') {
 			return $this->handleJson();

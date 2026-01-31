@@ -27,7 +27,7 @@ final class IliasSourceKindEnqueueAdminDisplay implements IAdminDisplay {
 		return 'iliassourcekindenqueueadmindisplay';
 	}
 
-	public function getHelp() {
+	public function getHelp(): string {
 		return 'Toggle enqueue per ILIAS source_kind (IContentProvider::getSourceKind). Default is OFF. After changes, the enqueue job is unblocked by clearing last_run_at in state store.';
 	}
 
@@ -35,8 +35,8 @@ final class IliasSourceKindEnqueueAdminDisplay implements IAdminDisplay {
 		// no-op
 	}
 
-	public function getOutput($out = 'html') {
-		$out = strtolower((string)$out);
+	public function getOutput(string $out = 'html', bool $final = false): string {
+		$out = strtolower($out);
 
 		if ($out === 'json') {
 			return $this->handleJson();

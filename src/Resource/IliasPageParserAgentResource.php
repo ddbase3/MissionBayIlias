@@ -17,6 +17,7 @@ use MissionBay\Resource\AbstractAgentResource;
  * - wiki_page
  * - blog_posting
  * - glo_term
+ * - lm_page
  * - cat
  *
  * Critical contract:
@@ -31,8 +32,9 @@ final class IliasPageParserAgentResource extends AbstractAgentResource implement
         private const SUPPORTED_TYPES = [
                 'wiki_page',
                 'blog_posting',
-                'glo_term',
-                'cat',
+		'glo_term',
+		'lm_page',
+                'cat'
         ];
 
         public static function getName(): string {
@@ -40,7 +42,8 @@ final class IliasPageParserAgentResource extends AbstractAgentResource implement
         }
 
         public function getDescription(): string {
-                return 'Parser for ILIAS PageObject content (wiki pages, blog postings, glossary terms, categories): converts rendered HTML/XML to text and keeps extractor root shape for chunking.';
+		return 'Parser for ILIAS PageObject content (wiki pages, blog postings, glossary terms, learning module pages, categories): '
+			. 'converts rendered HTML/XML to text and keeps extractor root shape for chunking.';
         }
 
         public function getPriority(): int {

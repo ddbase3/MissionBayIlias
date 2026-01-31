@@ -46,12 +46,12 @@ final class IliasEmbeddingProgressAdminDisplay implements IAdminDisplay {
 		// no-op
 	}
 
-	public function getHelp() {
+	public function getHelp(): string {
 		return 'ILIAS embedding progress by source_kind as one 100% stacked bar. Uses base3_embedding_seen as universe and keeps disabled-kinds visible while delete jobs are pending/running/error. Hides kind once deletes are done and seen rows are gone.';
 	}
 
-	public function getOutput($out = 'html') {
-		$out = strtolower((string)$out);
+	public function getOutput(string $out = 'html', bool $final = false): string {
+		$out = strtolower($out);
 
 		if ($out === 'json') {
 			return $this->handleJson();
