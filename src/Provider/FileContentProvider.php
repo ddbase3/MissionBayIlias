@@ -9,7 +9,7 @@ use MissionBayIlias\Dto\ContentBatchDto;
 use MissionBayIlias\Dto\ContentCursorDto;
 use MissionBayIlias\Dto\ContentUnitDto;
 
-final class FileContentProvider implements IContentProvider {
+final class FileContentProvider extends AbstractContentProvider {
 
 	private const SOURCE_SYSTEM = 'ilias';
 	private const SOURCE_KIND = 'file';
@@ -363,13 +363,5 @@ final class FileContentProvider implements IContentProvider {
 		}
 
 		return $cache[$type] = $readOpsId;
-	}
-
-	private function queryAll(string $sql): array {
-		return $this->db->multiQuery($sql) ?: [];
-	}
-
-	private function esc(string $value): string {
-		return (string)$this->db->escape($value);
 	}
 }

@@ -3,13 +3,12 @@
 namespace MissionBayIlias\Provider;
 
 use Base3\Database\Api\IDatabase;
-use MissionBayIlias\Api\IContentProvider;
 use MissionBayIlias\Api\IObjectTreeResolver;
 use MissionBayIlias\Dto\ContentBatchDto;
 use MissionBayIlias\Dto\ContentCursorDto;
 use MissionBayIlias\Dto\ContentUnitDto;
 
-final class BlogPostingContentProvider implements IContentProvider {
+final class BlogPostingContentProvider extends AbstractContentProvider {
 
         private const SOURCE_SYSTEM = 'ilias';
         private const SOURCE_KIND = 'blog_posting';
@@ -288,13 +287,5 @@ final class BlogPostingContentProvider implements IContentProvider {
         private function nullIfEmpty(string $v): ?string {
                 $v = trim($v);
                 return $v !== '' ? $v : null;
-        }
-
-        private function queryAll(string $sql): array {
-                return $this->db->multiQuery($sql) ?: [];
-        }
-
-        private function esc(string $value): string {
-                return (string)$this->db->escape($value);
         }
 }

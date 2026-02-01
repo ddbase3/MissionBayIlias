@@ -3,13 +3,12 @@
 namespace MissionBayIlias\Provider;
 
 use Base3\Database\Api\IDatabase;
-use MissionBayIlias\Api\IContentProvider;
 use MissionBayIlias\Api\IObjectTreeResolver;
 use MissionBayIlias\Dto\ContentBatchDto;
 use MissionBayIlias\Dto\ContentCursorDto;
 use MissionBayIlias\Dto\ContentUnitDto;
 
-final class LearningModuleContentProvider implements IContentProvider {
+final class LearningModuleContentProvider extends AbstractContentProvider {
 
 	private const SOURCE_SYSTEM = 'ilias';
 	private const SOURCE_KIND = 'lm';
@@ -323,13 +322,5 @@ final class LearningModuleContentProvider implements IContentProvider {
 		}
 
 		return $cache[$type] = $readOpsId;
-	}
-
-	private function queryAll(string $sql): array {
-		return $this->db->multiQuery($sql) ?: [];
-	}
-
-	private function esc(string $value): string {
-		return (string)$this->db->escape($value);
 	}
 }
