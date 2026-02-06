@@ -215,9 +215,6 @@ final class IliasEmbeddingProgressAdminDisplay implements IAdminDisplay {
 		}
 
 		usort($items, function(array $a, array $b): int {
-			$ta = (int)($a['total'] ?? 0);
-			$tb = (int)($b['total'] ?? 0);
-			if ($ta !== $tb) return $tb <=> $ta;
 			return strcmp((string)$a['source_kind'], (string)$b['source_kind']);
 		});
 
