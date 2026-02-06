@@ -14,9 +14,11 @@ final class LearningModuleContentProvider extends AbstractContentProvider {
 	private const SOURCE_KIND = 'lm';
 
 	public function __construct(
-		private readonly IDatabase $db,
+		IDatabase $db,
 		private readonly IObjectTreeResolver $objectTreeResolver
-	) {}
+	) {
+		parent::__construct($db);
+	}
 
 	public static function getName(): string {
 		return 'learningmodulecontentprovider';

@@ -14,9 +14,11 @@ final class CourseContentProvider extends AbstractContentProvider {
 	private const SOURCE_KIND = 'crs';
 
 	public function __construct(
-		private readonly IDatabase $db,
+		IDatabase $db,
 		private readonly IObjectTreeResolver $objectTreeResolver
-	) {}
+	) {
+		parent::__construct($db);
+	}
 
 	public static function getName(): string {
 		return 'coursecontentprovider';

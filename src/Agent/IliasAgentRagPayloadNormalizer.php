@@ -142,7 +142,6 @@ final class IliasAgentRagPayloadNormalizer implements IAgentRagPayloadNormalizer
 			'chunk_index' => $chunk->chunkIndex,
 		];
 
-		$this->addIfString($payload, 'content_id_hex', $meta['content_id_hex'] ?? null);
 		$this->addIfString($payload, 'source_kind', $meta['source_kind'] ?? null);
 		$this->addIfString($payload, 'source_locator', $meta['source_locator'] ?? null);
 		$this->addIfInt($payload, 'container_obj_id', $meta['container_obj_id'] ?? null);

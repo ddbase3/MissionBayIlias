@@ -16,9 +16,11 @@ final class CategoryContentProvider extends AbstractContentProvider {
 	private const PARENT_TYPE = 'cat';
 
 	public function __construct(
-		private readonly IDatabase $db,
+		IDatabase $db,
 		private readonly IObjectTreeResolver $objectTreeResolver
-	) {}
+	) {
+		parent::__construct($db);
+	}
 
 	public static function getName(): string {
 		return 'categorycontentprovider';

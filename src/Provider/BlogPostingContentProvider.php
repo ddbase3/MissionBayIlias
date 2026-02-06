@@ -17,9 +17,11 @@ final class BlogPostingContentProvider extends AbstractContentProvider {
         private const PARENT_TYPE = 'blp';
 
         public function __construct(
-                private readonly IDatabase $db,
+                IDatabase $db,
                 private readonly IObjectTreeResolver $objectTreeResolver
-        ) {}
+	) {
+		parent::__construct($db);
+	}
 
         public static function getName(): string {
                 return 'blogpostingcontentprovider';
