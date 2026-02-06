@@ -238,6 +238,9 @@ final class IliasChunkerAgentResource extends AbstractAgentResource implements I
 		$pairs = [];
 
 		foreach ($this->inlineMetaFields as $field) {
+			// deceided to use kind and title only
+			if (!in_array($field, ['kind', 'title'])) continue;
+
 			$val = null;
 
 			// special virtual field
