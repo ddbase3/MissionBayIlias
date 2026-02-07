@@ -16,18 +16,10 @@ final class IliasChunkerAgentResource extends AbstractAgentResource implements I
 	protected int $overlap = 50;
 
 	/**
-	 * Inline metadata that is prefixed to every chunk as a HTML comment marker.
-	 * Keep it small, stable, and filter-friendly.
-	 *
-	 * @var string[]
+	 * Only kind is kept as inline marker for debugging / later traceability.
+	 * Everything else is moved to payload metadata (filterable fields), not to text.
 	 */
-	protected array $inlineMetaFields = [
-		'kind',
-		'locator',
-		'container_obj_id',
-		'source_int_id',
-		'title'
-	];
+	protected bool $inlineKindMarker = true;
 
 	/**
 	 * @var array<string,mixed>
@@ -44,7 +36,7 @@ final class IliasChunkerAgentResource extends AbstractAgentResource implements I
 	}
 
 	public function getDescription(): string {
-		return 'RAG chunker for ILIAS content units (wiki/wiki_page): merge content fields, sticky headings, inline meta in every chunk.';
+		return 'RAG chunker for ILIAS content units (wiki/wiki_page): clean chunks, title header in every chunk, payload-only metadata.';
 	}
 
 	public function getPriority(): int {
@@ -58,13 +50,14 @@ final class IliasChunkerAgentResource extends AbstractAgentResource implements I
 		$this->minLength = $this->resolveInt($config, 'min_length', $this->minLength);
 		$this->overlap = $this->resolveInt($config, 'overlap', $this->overlap);
 
-		$this->inlineMetaFields = $this->resolveInlineMetaFields($config);
+		$value = $this->resolver->resolveValue($config['inline_kind_marker'] ?? $this->inlineKindMarker);
+		$this->inlineKindMarker = (bool)$value;
 
 		$this->resolvedOptions = [
 			'max_length' => $this->maxLength,
 			'min_length' => $this->minLength,
 			'overlap' => $this->overlap,
-			'inline_meta_fields' => $this->inlineMetaFields
+			'inline_kind_marker' => $this->inlineKindMarker
 		];
 	}
 
@@ -112,113 +105,50 @@ final class IliasChunkerAgentResource extends AbstractAgentResource implements I
 	 * @return array<int,array<string,mixed>>
 	 */
 	protected function chunkStructured(array $root, array $data, array $meta): array {
-		$inlineMeta = $this->buildInlineMetadata($root, $data);
+		$meta = $this->mergeFilterMetaFromPayload($data, $meta);
 
-		$metaLines = [];
-		$textSections = [];
+		$title = $this->pickTitle($root, $data, $meta);
+		$kind = $this->pickKind($root, $data, $meta);
 
-		/*
-		 * Key fix:
-		 * Treat short strings as metadata lines (not as their own "## <Key>" text sections).
-		 * This prevents tiny "## Title" chunks and keeps the first chunk useful.
-		 */
-		$shortTextThreshold = max(100, (int)floor($this->minLength / 2)); // e.g. minLength=500 => 250
+		$header = $this->buildHeader($title, $kind);
+		$body = $this->buildBodyText($data);
 
-		foreach ($data as $key => $value) {
-			if ($value === null || $value === '' || $value === '0' || $value === 0) {
-				continue;
-			}
-
-			if (is_numeric($value) || is_bool($value)) {
-				$metaLines[] = ucfirst((string)$key) . ": " . json_encode($value);
-				continue;
-			}
-
-			if (is_string($value)) {
-				$val = trim($value);
-
-				if ($val === '') {
-					continue;
-				}
-
-				$len = mb_strlen($val);
-
-				if ($len <= $shortTextThreshold) {
-					$metaLines[] = ucfirst((string)$key) . ": " . $val;
-					continue;
-				}
-
-				$textSections[(string)$key] = $this->normalizeNewlines($val);
-				continue;
-			}
-
-			if (is_array($value) || is_object($value)) {
-				$json = json_encode($value, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE | JSON_PRETTY_PRINT);
-				$json = $this->normalizeNewlines((string)$json);
-
-				if (mb_strlen($json) <= 100) {
-					$metaLines[] = ucfirst((string)$key) . ": " . trim($json);
-				} else {
-					$textSections[(string)$key] = $json;
-				}
-				continue;
-			}
+		// Edge: if there is no body at all, still emit a single chunk with title.
+		if (trim($body) === '') {
+			return [$this->makeChunk(trim($header), $meta)];
 		}
 
-		$name = $this->pickName($root, $data);
-		$fullText = $this->buildFullText($name, $metaLines, $textSections);
+		// Split body only, but reserve space for header in every chunk.
+		$bodyChunks = $this->chunkTextMaxFit($body, $this->calcBodyMaxLength($header));
 
-		$rawChunks = $this->chunkTextMaxFit($fullText);
-
-		if ($this->overlap > 0 && count($rawChunks) > 1) {
-			$rawChunks = $this->applyOverlapRaw($rawChunks);
+		if ($this->overlap > 0 && count($bodyChunks) > 1) {
+			$bodyChunks = $this->applyOverlapRaw($bodyChunks);
 		}
 
 		$out = [];
-		foreach ($rawChunks as $raw) {
-			$out[] = $this->makeChunk($this->prefixMeta($inlineMeta, $raw), $meta);
+		foreach ($bodyChunks as $rawBody) {
+			$text = $this->composeChunkText($header, $rawBody);
+			$out[] = $this->makeChunk($text, $meta);
 		}
 
 		return $out;
 	}
 
 	/**
-	 * @param array<int,string> $metaLines
-	 * @param array<string,string> $textSections
+	 * Prefer content.title, fallback to extractor metadata.title, then kind+locator.
+	 *
+	 * @param array<string,mixed> $root
+	 * @param array<string,mixed> $data
+	 * @param array<string,mixed> $meta
 	 */
-	protected function buildFullText(string $name, array $metaLines, array $textSections): string {
-		$parts = [];
-
-		$parts[] = "# " . $name;
-		$parts[] = "";
-		$parts[] = "## Metadata";
-		if ($metaLines) {
-			$parts[] = implode("\n", $metaLines);
-		}
-
-		foreach ($textSections as $key => $content) {
-			$parts[] = "";
-			$parts[] = "## " . ucfirst((string)$key);
-			$parts[] = "";
-			$parts[] = trim((string)$content);
-		}
-
-		return trim(implode("\n", $parts));
-	}
-
-	/**
-	 * ILIAS naming:
-	 * - prefer content.title
-	 * - fallback: kind + locator
-	 */
-	protected function pickName(array $root, array $data): string {
-		$title = $data['title'] ?? null;
+	protected function pickTitle(array $root, array $data, array $meta): string {
+		$title = $data['title'] ?? $meta['title'] ?? $root['title'] ?? null;
 		if (is_string($title) && trim($title) !== '') {
 			return trim($title);
 		}
 
-		$kind = $root['kind'] ?? null;
-		$locator = $root['locator'] ?? null;
+		$kind = $root['kind'] ?? $data['kind'] ?? $meta['source_kind'] ?? null;
+		$locator = $root['locator'] ?? $data['locator'] ?? $meta['source_locator'] ?? null;
 
 		if (is_string($kind) && $kind !== '' && is_string($locator) && $locator !== '') {
 			return strtoupper($kind) . ' ' . $locator;
@@ -232,45 +162,141 @@ final class IliasChunkerAgentResource extends AbstractAgentResource implements I
 	}
 
 	/**
-	 * Inline marker helps later retrieval / debugging.
+	 * @param array<string,mixed> $root
+	 * @param array<string,mixed> $data
+	 * @param array<string,mixed> $meta
 	 */
-	protected function buildInlineMetadata(array $root, array $data): string {
-		$pairs = [];
+	protected function pickKind(array $root, array $data, array $meta): string {
+		$kind = $root['kind'] ?? $data['kind'] ?? $meta['source_kind'] ?? null;
+		if (is_string($kind) && trim($kind) !== '') {
+			return trim($kind);
+		}
+		return '';
+	}
 
-		foreach ($this->inlineMetaFields as $field) {
-			// deceided to use kind and title only
-			if (!in_array($field, ['kind', 'title'])) continue;
+	protected function buildHeader(string $title, string $kind): string {
+		$parts = [];
 
-			$val = null;
+		if ($this->inlineKindMarker && $kind !== '') {
+			// Minimal inline marker; IDs/locator/title are intentionally excluded.
+			$k = str_replace('"', "'", $kind);
+			$parts[] = "<!-- meta: kind=\"{$k}\" -->";
+		}
 
-			// special virtual field
-			if ($field === 'title') {
-				$val = $data['title'] ?? $root['title'] ?? null;
-			} else {
-				$val = $root[$field] ?? $data[$field] ?? null;
+		$parts[] = '# ' . $title;
+
+		// Keep one blank line after header.
+		return trim(implode("\n", $parts)) . "\n\n";
+	}
+
+	/**
+	 * Build only semantically relevant body text for embeddings.
+	 * Everything "metadata-like" stays in payload metadata, not in text.
+	 *
+	 * @param array<string,mixed> $data
+	 */
+	protected function buildBodyText(array $data): string {
+		$parts = [];
+
+		// Primary: most ILIAS providers use "content" for the main text.
+		$main = $data['content'] ?? null;
+		if (is_string($main)) {
+			$main = trim($this->normalizeNewlines($main));
+			if ($main !== '') {
+				$parts[] = $main;
 			}
+		}
 
-			if ($val === null) {
+		// Optional: if provider uses other long text fields, include them if they are "big enough".
+		// This avoids accidental inclusion of short metadata-like strings.
+		$skipKeys = [
+			'title', 'type', 'kind', 'locator', 'source_locator',
+			'page_id', 'wiki_obj_id', 'container_obj_id', 'source_int_id',
+			'meta', 'render_md5', 'created', 'last_change', 'lang', 'page_lang'
+		];
+
+		$minTextLen = max(120, (int)floor($this->minLength / 2));
+
+		foreach ($data as $key => $value) {
+			$k = (string)$key;
+
+			if (in_array($k, $skipKeys, true)) {
 				continue;
 			}
 
-			if (is_array($val)) {
-				$val = implode(',', array_map('trim', array_map('strval', $val)));
+			if (!is_string($value)) {
+				continue;
 			}
 
-			if (is_object($val)) {
-				$val = json_encode($val, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
+			$val = trim($this->normalizeNewlines($value));
+			if ($val === '') {
+				continue;
 			}
 
-			$v = str_replace('"', "'", (string)$val);
-			$pairs[] = "{$field}=\"{$v}\"";
+			if (mb_strlen($val) < $minTextLen) {
+				continue;
+			}
+
+			// Keep section marker (helps retrieval) but do not add noisy metadata blocks.
+			$parts[] = "## " . ucfirst($k) . "\n\n" . $val;
 		}
 
-		if (!$pairs) {
-			return "<!-- meta: -->";
+		return trim(implode("\n\n", $parts));
+	}
+
+	/**
+	 * Merge filter/invalidator metadata from content payload into chunk meta.
+	 *
+	 * We support either:
+	 * - top-level keys on $data (created/last_change/lang/page_lang/render_md5), or
+	 * - nested array/object at $data['meta'] with those keys
+	 *
+	 * @param array<string,mixed> $data
+	 * @param array<string,mixed> $meta
+	 * @return array<string,mixed>
+	 */
+	protected function mergeFilterMetaFromPayload(array $data, array $meta): array {
+		$fields = ['created', 'last_change', 'lang', 'page_lang', 'render_md5'];
+
+		$nested = $data['meta'] ?? null;
+		$nestedArr = (is_array($nested) || is_object($nested)) ? (array)$nested : [];
+
+		foreach ($fields as $f) {
+			$v = $data[$f] ?? $nestedArr[$f] ?? null;
+
+			if (!is_string($v)) {
+				continue;
+			}
+
+			$v = trim($v);
+			if ($v === '') {
+				continue;
+			}
+
+			$meta[$f] = $v;
 		}
 
-		return "<!-- meta: " . implode("; ", $pairs) . " -->";
+		return $meta;
+	}
+
+	protected function composeChunkText(string $header, string $body): string {
+		$body = trim($body);
+		if ($body === '') {
+			return trim($header);
+		}
+		return trim($header . $body);
+	}
+
+	protected function calcBodyMaxLength(string $header): int {
+		$headerLen = mb_strlen($header);
+
+		// Ensure we always have reasonable space for body.
+		$bodyMax = $this->maxLength - $headerLen;
+		if ($bodyMax < 200) {
+			$bodyMax = 200;
+		}
+
+		return $bodyMax;
 	}
 
 	private function resolveInt(array $config, string $key, int $default): int {
@@ -278,53 +304,23 @@ final class IliasChunkerAgentResource extends AbstractAgentResource implements I
 		return (int)$value;
 	}
 
-	/**
-	 * @return string[]
-	 */
-	private function resolveInlineMetaFields(array $config): array {
-		$value = $this->resolver->resolveValue($config['inline_meta_fields'] ?? $this->inlineMetaFields);
-
-		if (is_string($value)) {
-			$items = array_map('trim', explode(',', $value));
-			$items = array_values(array_filter($items, fn($v) => $v !== ''));
-			return $items ?: $this->inlineMetaFields;
-		}
-
-		if (is_array($value)) {
-			$out = [];
-			foreach ($value as $v) {
-				$s = trim((string)$v);
-				if ($s !== '') {
-					$out[] = $s;
-				}
-			}
-			return $out ?: $this->inlineMetaFields;
-		}
-
-		return $this->inlineMetaFields;
-	}
-
 	private function normalizeNewlines(string $text): string {
 		return preg_replace('/\R/u', "\n", $text);
 	}
 
-	private function prefixMeta(string $inlineMeta, string $text): string {
-		return trim($inlineMeta . "\n" . trim($text));
-	}
-
 	/**
-	 * Max-fit chunking:
+	 * Max-fit chunking for BODY ONLY:
 	 * - split by paragraphs
 	 * - keep headings sticky with following paragraph
 	 * - fallback: split by lines, then hard split
 	 *
 	 * @return array<int,string>
 	 */
-	private function chunkTextMaxFit(string $text): array {
+	private function chunkTextMaxFit(string $text, int $maxLen): array {
 		$text = $this->normalizeNewlines($text);
 
-		if (mb_strlen($text) <= $this->maxLength) {
-			return [$text];
+		if (mb_strlen($text) <= $maxLen) {
+			return [trim($text)];
 		}
 
 		$paras = $this->splitParagraphs($text);
@@ -341,7 +337,7 @@ final class IliasChunkerAgentResource extends AbstractAgentResource implements I
 
 			$candidate = ($current === '' ? $p : $current . "\n\n" . $p);
 
-			if (mb_strlen($candidate) <= $this->maxLength) {
+			if (mb_strlen($candidate) <= $maxLen) {
 				$current = $candidate;
 				continue;
 			}
@@ -351,12 +347,12 @@ final class IliasChunkerAgentResource extends AbstractAgentResource implements I
 				$current = '';
 			}
 
-			if (mb_strlen($p) <= $this->maxLength) {
+			if (mb_strlen($p) <= $maxLen) {
 				$current = $p;
 				continue;
 			}
 
-			foreach ($this->splitByLinesMaxFit($p) as $part) {
+			foreach ($this->splitByLinesMaxFit($p, $maxLen) as $part) {
 				$out[] = $part;
 			}
 		}
@@ -422,7 +418,7 @@ final class IliasChunkerAgentResource extends AbstractAgentResource implements I
 	/**
 	 * @return array<int,string>
 	 */
-	private function splitByLinesMaxFit(string $text): array {
+	private function splitByLinesMaxFit(string $text, int $maxLen): array {
 		$text = $this->normalizeNewlines($text);
 		$lines = explode("\n", $text);
 
@@ -434,7 +430,7 @@ final class IliasChunkerAgentResource extends AbstractAgentResource implements I
 
 			$candidate = ($current === '' ? $line : $current . "\n" . $line);
 
-			if (mb_strlen($candidate) <= $this->maxLength) {
+			if (mb_strlen($candidate) <= $maxLen) {
 				$current = $candidate;
 				continue;
 			}
@@ -444,12 +440,12 @@ final class IliasChunkerAgentResource extends AbstractAgentResource implements I
 				$current = '';
 			}
 
-			if (mb_strlen($line) <= $this->maxLength) {
+			if (mb_strlen($line) <= $maxLen) {
 				$current = $line;
 				continue;
 			}
 
-			foreach ($this->hardSplit($line, $this->maxLength) as $part) {
+			foreach ($this->hardSplit($line, $maxLen) as $part) {
 				$out[] = $part;
 			}
 		}

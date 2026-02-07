@@ -10,8 +10,6 @@ use MissionBay\Dto\AgentEmbeddingChunk;
  *
  * ILIAS normalizer for Qdrant payloads.
  *
- * Goal: mirror XRM normalizer shape so downstream logic can stay generic.
- *
  * Agreements:
  * - content_uuid is canonical: 32 HEX chars, UPPERCASE, no dashes
  * - collectionKey canonical is 'ilias'
@@ -75,6 +73,13 @@ final class IliasAgentRagPayloadNormalizer implements IAgentRagPayloadNormalizer
 			'ancestor_ref_ids' => ['type' => 'integer', 'index' => true],
 
 			'title' => ['type' => 'text', 'index' => true],
+
+			// Filterable / invalidation helpers (payload-only, not in chunk text)
+			'created' => ['type' => 'keyword', 'index' => true],
+			'last_change' => ['type' => 'keyword', 'index' => true],
+			'lang' => ['type' => 'keyword', 'index' => true],
+			'page_lang' => ['type' => 'keyword', 'index' => true],
+			'render_md5' => ['type' => 'keyword', 'index' => true],
 		];
 	}
 
@@ -148,6 +153,13 @@ final class IliasAgentRagPayloadNormalizer implements IAgentRagPayloadNormalizer
 		$this->addIfInt($payload, 'source_int_id', $meta['source_int_id'] ?? null);
 		$this->addIfString($payload, 'title', $meta['title'] ?? null);
 		$this->addIfInt($payload, 'num_chunks', $meta['num_chunks'] ?? null);
+
+		// Filterable / invalidation helpers (payload-only)
+		$this->addIfString($payload, 'created', $meta['created'] ?? null);
+		$this->addIfString($payload, 'last_change', $meta['last_change'] ?? null);
+		$this->addIfString($payload, 'lang', $meta['lang'] ?? null);
+		$this->addIfString($payload, 'page_lang', $meta['page_lang'] ?? null);
+		$this->addIfString($payload, 'render_md5', $meta['render_md5'] ?? null);
 
 		// Keep behavior for these: only include if non-empty
 		foreach (['read_roles', 'mount_ref_ids'] as $k) {
