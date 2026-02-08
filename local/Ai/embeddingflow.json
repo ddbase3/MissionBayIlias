@@ -2,11 +2,11 @@
 	"nodes": [
 		{ "id": "embedding", "type": "aiembeddingnode", "docks": {
 			"extractor": [ "extractor" ],
-			"parser": [ "fileparser", "pageparser", "courseparser", "parser" ],
+			"parser": [ "parserproxy" ],
 			"chunker": [ "chunker" ],
 			"embedder": [ "embeddingcache" ],
-			"vectordb": [ "vectordb" ],
-			"logger": [ "logger" ]
+			"vectordb": [ "vectordbproxy" ],
+			"logger": []
 		}, "inputs": {
 			"mode": "replace",
 			"debug": true,
@@ -28,6 +28,14 @@
 		{ "id": "courseparser", "type": "iliascourseparseragentresource" },
 		{ "id": "parser", "type": "structuredobjectparseragentresource" },
 
+		{ "id": "parserproxy", "type": "fulltextindexingparseragentresource", "docks": {
+			"parsers": [ "fileparser", "pageparser", "courseparser", "parser" ],
+			"logger": []
+		}, "config": {
+			"phonetic_encoder": { "mode": "fixed", "value": "colognephoneticencoder" },
+			"phonetic_int_converter": { "mode": "fixed", "value": "reversephoneticstringtointconverter" }
+		}},
+
 		{ "id": "chunker", "type": "iliaschunkeragentresource", "config": {
 			"max_length": { "mode": "fixed", "value": 1500 },
 			"min_length": { "mode": "fixed", "value": 500 },
@@ -35,7 +43,8 @@
 		}},
 
 		{ "id": "embeddingcache", "type": "embeddingcacheagentresource", "docks": {
-			"embedding": [ "embedder" ]
+			"embedding": [ "embedder" ],
+			"logger": []
 		}, "config": {
 			"model": { "mode": "fixed", "value": "text-embedding-3-large" }
 		}},
@@ -45,6 +54,10 @@
 			"model": { "mode": "fixed", "value": "text-embedding-3-large" }
 		}},
 
+		{ "id": "vectordbproxy", "type": "searchindexvectorstoreproxyagentresource", "docks": {
+			"store": [ "vectordb" ],
+			"logger": []
+		}},
 		{ "id": "vectordb", "type": "qualitusqdrantvectorstoreagentresource", "config": {
 			"endpoint": { "mode": "config", "section": "qualitusvectordb", "key": "endpoint" },
 			"apikey": { "mode": "config", "section": "qualitusvectordb", "key": "apikey" },
