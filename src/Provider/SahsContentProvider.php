@@ -1,0 +1,354 @@
+<?php declare(strict_types=1);
+
+namespace MissionBayIlias\Provider;
+
+use Base3\Database\Api\IDatabase;
+use MissionBayIlias\Api\IObjectTreeResolver;
+use MissionBayIlias\Dto\ContentBatchDto;
+use MissionBayIlias\Dto\ContentCursorDto;
+use MissionBayIlias\Dto\ContentUnitDto;
+
+final class SahsContentProvider extends AbstractContentProvider {
+
+	private const SOURCE_SYSTEM = 'ilias';
+	private const SOURCE_KIND = 'sahs';
+
+	public function __construct(
+		IDatabase $db,
+		private readonly IObjectTreeResolver $objectTreeResolver
+	) {
+		parent::__construct($db);
+	}
+
+	public static function getName(): string {
+		return 'sahscontentprovider';
+	}
+
+	public function isActive() {
+		return true;
+	}
+
+	public function getSourceSystem(): string {
+		return self::SOURCE_SYSTEM;
+	}
+
+	public function getSourceKind(): string {
+		return self::SOURCE_KIND;
+	}
+
+	public function fetchChanged(ContentCursorDto $cursor, int $limit): ContentBatchDto {
+		$limit = max(1, (int)$limit);
+
+		$sinceTs = trim((string)($cursor->changedAt ?? ''));
+		$sinceId = (int)($cursor->changedId ?? 0);
+
+		// English comment: Provider must be robust even if cursor is empty/invalid.
+		if (!$this->isValidTimestamp($sinceTs)) {
+			$sinceTs = '1970-01-01 00:00:00';
+			$sinceId = 0;
+		}
+		if ($sinceId < 0) {
+			$sinceId = 0;
+		}
+
+		$rows = $this->queryAll(
+			"SELECT
+				o.obj_id,
+				o.title,
+				o.description,
+				o.last_update,
+				o.create_date,
+				sl.c_online,
+				sl.c_type,
+				sl.module_version,
+				sl.editable
+			FROM object_data o
+			LEFT JOIN sahs_lm sl ON sl.id = o.obj_id
+			WHERE o.type = 'sahs'
+				AND o.last_update IS NOT NULL
+				AND (
+					o.last_update > '" . $this->esc($sinceTs) . "'
+					OR (
+						o.last_update = '" . $this->esc($sinceTs) . "'
+						AND o.obj_id > " . (int)$sinceId . "
+					)
+				)
+			ORDER BY o.last_update ASC, o.obj_id ASC
+			LIMIT " . $limit
+		);
+
+		if (!$rows) {
+			return new ContentBatchDto([], new ContentCursorDto($sinceTs, $sinceId));
+		}
+
+		$units = [];
+		$maxTs = $sinceTs;
+		$maxId = $sinceId;
+
+		foreach ($rows as $row) {
+			$objId = (int)($row['obj_id'] ?? 0);
+			$lastUpdate = trim((string)($row['last_update'] ?? ''));
+
+			if ($objId <= 0 || $lastUpdate === '') {
+				continue;
+			}
+
+			$title = $this->nullIfEmpty((string)($row['title'] ?? ''));
+			$desc = $this->nullIfEmpty((string)($row['description'] ?? ''));
+
+			$locator = 'sahs:' . $objId;
+
+			$units[] = new ContentUnitDto(
+				self::SOURCE_SYSTEM,
+				self::SOURCE_KIND,
+				$locator,
+				$objId,
+				$objId,
+				$title,
+				$desc,
+				$lastUpdate,
+				null
+			);
+
+			if ($lastUpdate > $maxTs) {
+				$maxTs = $lastUpdate;
+				$maxId = $objId;
+			} elseif ($lastUpdate === $maxTs && $objId > $maxId) {
+				$maxId = $objId;
+			}
+		}
+
+		return new ContentBatchDto(
+			$units,
+			new ContentCursorDto($maxTs, $maxId)
+		);
+	}
+
+	public function fetchMissingSourceIntIds(int $limit): array {
+		$limit = max(1, (int)$limit);
+
+		$rows = $this->queryAll(
+			"SELECT s.source_int_id
+			FROM base3_embedding_seen s
+			LEFT JOIN object_data o
+				ON o.obj_id = s.source_int_id
+				AND o.type = 'sahs'
+			WHERE s.source_system = '" . $this->esc(self::SOURCE_SYSTEM) . "'
+				AND s.source_kind = '" . $this->esc(self::SOURCE_KIND) . "'
+				AND s.source_int_id IS NOT NULL
+				AND s.missing_since IS NULL
+				AND s.deleted_at IS NULL
+				AND o.obj_id IS NULL
+			LIMIT " . $limit
+		);
+
+		$ids = [];
+		foreach ($rows as $row) {
+			$id = (int)($row['source_int_id'] ?? 0);
+			if ($id > 0) {
+				$ids[] = $id;
+			}
+		}
+
+		return $ids;
+	}
+
+	public function fetchContent(string $sourceLocator, ?int $containerObjId, ?int $sourceIntId): array {
+		$objId = $containerObjId !== null ? (int)$containerObjId : (int)($sourceIntId ?? 0);
+		if ($objId <= 0) {
+			$objId = $this->parseObjIdFromLocator($sourceLocator);
+		}
+		if ($objId <= 0) {
+			return [];
+		}
+
+		$rows = $this->queryAll(
+			"SELECT
+				o.obj_id,
+				o.title,
+				o.description,
+				o.last_update,
+				o.create_date,
+				sl.c_online,
+				sl.c_type,
+				sl.module_version,
+				sl.editable
+			FROM object_data o
+			LEFT JOIN sahs_lm sl ON sl.id = o.obj_id
+			WHERE o.obj_id = " . (int)$objId . "
+				AND o.type = 'sahs'
+			LIMIT 1"
+		);
+
+		$r = $rows[0] ?? null;
+		if (!$r) {
+			return [];
+		}
+
+		// CONTRACT: title MUST be string
+		$title = trim((string)($r['title'] ?? ''));
+		if ($title === '') {
+			$title = 'SAHS #' . $objId;
+		}
+
+		$desc = trim((string)($r['description'] ?? ''));
+
+		// English comment: Do NOT duplicate title in content; pipeline already renders title as heading.
+		$content = $desc !== '' ? $desc : '';
+
+		$refId = $this->getFirstRefIdByObjId((int)($r['obj_id'] ?? 0));
+
+		$scormVersion = trim((string)($r['c_type'] ?? ''));
+		$scormVersion = $scormVersion !== '' ? $scormVersion : null;
+
+		return [
+			'type' => 'sahs',
+			'obj_id' => (int)($r['obj_id'] ?? $objId),
+			'source_locator' => $sourceLocator,
+			'title' => $title,
+			'description' => $desc !== '' ? $desc : null,
+			'content' => $content,
+			'meta' => [
+				'ref_id' => $refId > 0 ? $refId : null,
+
+				'last_update' => $this->nullIfEmpty((string)($r['last_update'] ?? '')),
+				'create_date' => $this->nullIfEmpty((string)($r['create_date'] ?? '')),
+
+				'c_online' => $this->nullIfEmpty((string)($r['c_online'] ?? '')),
+				'c_type' => $this->nullIfEmpty((string)($r['c_type'] ?? '')),
+
+				// English comment: Convenience alias for filtering.
+				'scorm_version' => $scormVersion,
+
+				'module_version' => isset($r['module_version']) ? (int)$r['module_version'] : null,
+				'editable' => isset($r['editable']) ? (int)$r['editable'] : null,
+			]
+		];
+	}
+
+	public function fetchReadRoles(string $sourceLocator, ?int $containerObjId, ?int $sourceIntId): array {
+		$objId = $containerObjId !== null ? (int)$containerObjId : (int)($sourceIntId ?? 0);
+		if ($objId <= 0) {
+			$objId = $this->parseObjIdFromLocator($sourceLocator);
+		}
+		if ($objId <= 0) {
+			return [];
+		}
+
+		$refIds = \ilObject::_getAllReferences($objId);
+		if (!$refIds) {
+			return [];
+		}
+
+		global $DIC;
+		$review = $DIC->rbac()->review();
+
+		$readOpsId = $this->getReadOpsIdForType('sahs');
+		if ($readOpsId <= 0) {
+			return [];
+		}
+
+		$roleIds = [];
+
+		foreach ($refIds as $refId) {
+			$refId = (int)$refId;
+			if ($refId <= 0) {
+				continue;
+			}
+
+			foreach ($review->getParentRoleIds($refId) as $r) {
+				$rolId = (int)($r['rol_id'] ?? 0);
+				if ($rolId <= 0) {
+					continue;
+				}
+
+				$ops = $review->getActiveOperationsOfRole($refId, $rolId);
+				if ($ops && in_array($readOpsId, $ops, true)) {
+					$roleIds[$rolId] = true;
+				}
+			}
+		}
+
+		return array_keys($roleIds);
+	}
+
+	public function getDirectLink(string $sourceLocator, ?int $containerObjId, ?int $sourceIntId): string {
+		$objId = $containerObjId !== null ? (int)$containerObjId : (int)($sourceIntId ?? 0);
+		if ($objId <= 0) {
+			$objId = $this->parseObjIdFromLocator($sourceLocator);
+		}
+		if ($objId <= 0) {
+			return '';
+		}
+
+		$refId = $this->getFirstRefIdByObjId($objId);
+		if ($refId <= 0) {
+			return '';
+		}
+
+		return 'goto.php/sahs/' . $refId;
+	}
+
+	/* ---------- Helpers ---------- */
+
+	private function parseObjIdFromLocator(string $locator): int {
+		$parts = explode(':', trim($locator));
+		return ($parts[0] ?? '') === 'sahs' ? (int)($parts[1] ?? 0) : 0;
+	}
+
+	private function getFirstRefIdByObjId(int $objId): int {
+		if ($objId <= 0) {
+			return 0;
+		}
+
+		// English comment: Primary path via object tree resolver (consistent with other providers).
+		try {
+			$refIds = $this->objectTreeResolver->getRefIdsByObjId($objId);
+			$refId = (int)($refIds[0] ?? 0);
+			if ($refId > 0) {
+				return $refId;
+			}
+		} catch (\Throwable) {
+			// ignore and try fallback
+		}
+
+		// English comment: Fallback via ILIAS API.
+		try {
+			$refIds = \ilObject::_getAllReferences($objId);
+			return (int)($refIds[0] ?? 0);
+		} catch (\Throwable) {
+			return 0;
+		}
+	}
+
+	private function isValidTimestamp(string $ts): bool {
+		$ts = trim($ts);
+		if ($ts === '') {
+			return false;
+		}
+		return (bool)preg_match('/^\d{4}-\d{2}-\d{2}\s+\d{2}:\d{2}:\d{2}$/', $ts);
+	}
+
+	private function getReadOpsIdForType(string $type): int {
+		static $cache = [];
+
+		if (isset($cache[$type])) {
+			return (int)$cache[$type];
+		}
+
+		$readOpsId = 0;
+		foreach (\ilRbacReview::_getOperationList($type) as $op) {
+			if (($op['operation'] ?? '') === 'read') {
+				$readOpsId = (int)($op['ops_id'] ?? 0);
+				break;
+			}
+		}
+
+		return $cache[$type] = $readOpsId;
+	}
+
+	private function nullIfEmpty(string $v): ?string {
+		$v = trim($v);
+		return $v !== '' ? $v : null;
+	}
+}

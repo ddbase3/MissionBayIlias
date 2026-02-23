@@ -24,12 +24,19 @@
 			"timeout_seconds": { "mode": "fixed", "value": 90 },
 			"max_bytes": { "mode": "fixed", "value": 0 }
 		}},
+		{ "id": "doclingparser", "type": "iliasfilequalitusparseragentresource", "config": {
+			"endpoint": { "mode": "config", "section": "qualitusparser", "key": "endpoint" },
+			"apikey": { "mode": "config", "section": "qualitusparser", "key": "apikey" },
+			"timeout_seconds": { "mode": "fixed", "value": 90 },
+			"max_bytes": { "mode": "fixed", "value": 0 }
+		}},
+		{ "id": "sahsassetparser", "type": "iliassahsassetmarkupparseragentresource" },
 		{ "id": "pageparser", "type": "iliaspageparseragentresource" },
 		{ "id": "courseparser", "type": "iliascourseparseragentresource" },
 		{ "id": "parser", "type": "structuredobjectparseragentresource" },
 
 		{ "id": "parserproxy", "type": "fulltextindexingparseragentresource", "docks": {
-			"parsers": [ "fileparser", "pageparser", "courseparser", "parser" ],
+			"parsers": [ "fileparser", "sahsassetparser", "pageparser", "courseparser", "parser" ],
 			"logger": []
 		}, "config": {
 			"phonetic_encoder": { "mode": "fixed", "value": "colognephoneticencoder" },
@@ -51,7 +58,8 @@
 		{ "id": "embedder", "type": "qualitusembeddingproxyagentresource", "config": {
 			"endpoint": { "mode": "config", "section": "qualitusembedding", "key": "endpoint" },
 			"apikey": { "mode": "config", "section": "qualitusembedding", "key": "apikey" },
-			"model": { "mode": "fixed", "value": "text-embedding-3-large" }
+			"model": { "mode": "fixed", "value": "text-embedding-3-large" },
+			"max_texts_per_request": { "mode": "fixed", "value": 128 }
 		}},
 
 		{ "id": "vectordbproxy", "type": "searchindexvectorstoreproxyagentresource", "docks": {

@@ -95,7 +95,32 @@ final class IliasChunkerAgentResource extends AbstractAgentResource implements I
 		$content = $root['content'] ?? null;
 		$data = (is_array($content) || is_object($content)) ? (array)$content : [];
 
+		// Critical fallback for file parsers (Docling / Unstructured etc.):
+		// If payload does not carry extracted text in content.content, use AgentParsedContent->text.
+		$this->ensureBodyTextFromParsedText($data, $parsed);
+
 		return $this->chunkStructured($root, $data, $meta);
+	}
+
+	/**
+	 * Ensure we have a body text source in $data['content'] (string).
+	 * Docling output is reliably available in $parsed->text.
+	 *
+	 * @param array<string,mixed> $data
+	 */
+	private function ensureBodyTextFromParsedText(array &$data, AgentParsedContent $parsed): void {
+		$main = $data['content'] ?? null;
+
+		if (is_string($main) && trim($main) !== '') {
+			return;
+		}
+
+		$text = trim((string)($parsed->text ?? ''));
+		if ($text === '') {
+			return;
+		}
+
+		$data['content'] = $text;
 	}
 
 	/**
