@@ -6,6 +6,7 @@ use Base3\Api\IClassMap;
 use Base3\Api\IMvcView;
 use Base3\Api\IRequest;
 use Base3\Configuration\Api\IConfiguration;
+use Base3\LinkTarget\Api\ILinkTargetService;
 use MissionBay\Api\IAgentVectorStore;
 use UiFoundation\Api\IAdminDisplay;
 
@@ -24,7 +25,8 @@ final class IliasVectorStoreAdminDisplay implements IAdminDisplay {
 		private readonly IRequest $request,
 		private readonly IClassMap $classmap,
 		private readonly IMvcView $view,
-		private readonly IConfiguration $config
+		private readonly IConfiguration $config,
+		private readonly ILinkTargetService $linkTargetService
 	) {}
 
 	public static function getName(): string {
@@ -53,8 +55,7 @@ final class IliasVectorStoreAdminDisplay implements IAdminDisplay {
 		$this->view->setPath(DIR_PLUGIN . 'MissionBayIlias');
 		$this->view->setTemplate('AdminDisplay/IliasVectorStoreAdminDisplay.php');
 
-		$baseEndpoint = (string)($this->config->get('base')['endpoint'] ?? '');
-		$endpoint = $this->buildEndpointBase($baseEndpoint);
+		$endpoint = $this->buildEndpointBase();
 
 		$this->view->assign('endpoint', $endpoint);
 		$this->view->assign('collectionKey', self::COLLECTION_KEY);
@@ -392,17 +393,16 @@ final class IliasVectorStoreAdminDisplay implements IAdminDisplay {
 		return $store;
 	}
 
-	private function buildEndpointBase(string $baseEndpoint): string {
-		$baseEndpoint = trim($baseEndpoint);
-
-		// Fallback: typical BASE3 routing if config missing
-		if ($baseEndpoint === '') {
-			$baseEndpoint = 'base3.php';
-		}
-
-		$sep = str_contains($baseEndpoint, '?') ? '&' : '?';
-
-		return $baseEndpoint . $sep . 'name=' . rawurlencode(self::getName()) . '&out=json&action=';
+	private function buildEndpointBase(): string {
+		return $this->linkTargetService->getLink(
+			[
+				'name' => self::getName(),
+				'out' => 'json'
+			],
+			[
+				'action' => ''
+			]
+		);
 	}
 
 	private function jsonSuccess(array $data): string {

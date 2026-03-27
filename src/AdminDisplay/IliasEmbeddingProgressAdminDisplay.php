@@ -6,6 +6,7 @@ use Base3\Api\IMvcView;
 use Base3\Api\IRequest;
 use Base3\Configuration\Api\IConfiguration;
 use Base3\Database\Api\IDatabase;
+use Base3\LinkTarget\Api\ILinkTargetService;
 use UiFoundation\Api\IAdminDisplay;
 
 /**
@@ -35,7 +36,8 @@ final class IliasEmbeddingProgressAdminDisplay implements IAdminDisplay {
 		private readonly IRequest $request,
 		private readonly IMvcView $view,
 		private readonly IConfiguration $config,
-		private readonly IDatabase $db
+		private readonly IDatabase $db,
+		private readonly ILinkTargetService $linkTargetService
 	) {}
 
 	public static function getName(): string {
@@ -64,8 +66,7 @@ final class IliasEmbeddingProgressAdminDisplay implements IAdminDisplay {
 		$this->view->setPath(DIR_PLUGIN . 'MissionBayIlias');
 		$this->view->setTemplate('AdminDisplay/IliasEmbeddingProgressAdminDisplay.php');
 
-		$baseEndpoint = (string)($this->config->get('base')['endpoint'] ?? '');
-		$endpoint = $this->buildEndpointBase($baseEndpoint);
+		$endpoint = $this->buildEndpointBase();
 
 		$this->view->assign('endpoint', $endpoint);
 
@@ -231,16 +232,16 @@ final class IliasEmbeddingProgressAdminDisplay implements IAdminDisplay {
 		];
 	}
 
-	private function buildEndpointBase(string $baseEndpoint): string {
-		$baseEndpoint = trim($baseEndpoint);
-
-		if ($baseEndpoint === '') {
-			$baseEndpoint = 'base3.php';
-		}
-
-		$sep = str_contains($baseEndpoint, '?') ? '&' : '?';
-
-		return $baseEndpoint . $sep . 'name=' . rawurlencode(self::getName()) . '&out=json&action=';
+	private function buildEndpointBase(): string {
+		return $this->linkTargetService->getLink(
+			[
+				'name' => self::getName(),
+				'out' => 'json'
+			],
+			[
+				'action' => ''
+			]
+		);
 	}
 
 	private function jsonSuccess(array $data): string {

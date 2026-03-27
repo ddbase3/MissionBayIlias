@@ -5,6 +5,7 @@ namespace MissionBayIlias\AdminDisplay;
 use Base3\Api\IMvcView;
 use Base3\Api\IRequest;
 use Base3\Configuration\Api\IConfiguration;
+use Base3\LinkTarget\Api\ILinkTargetService;
 use UiFoundation\Api\IAdminDisplay;
 
 final class IliasVectorPointsAdminDisplay implements IAdminDisplay {
@@ -24,7 +25,8 @@ final class IliasVectorPointsAdminDisplay implements IAdminDisplay {
 	public function __construct(
 		private readonly IRequest $request,
 		private readonly IMvcView $view,
-		private readonly IConfiguration $config
+		private readonly IConfiguration $config,
+		private readonly ILinkTargetService $linkTargetService
 	) {}
 
 	public static function getName(): string {
@@ -53,8 +55,7 @@ final class IliasVectorPointsAdminDisplay implements IAdminDisplay {
 		$this->view->setPath(DIR_PLUGIN . 'MissionBayIlias');
 		$this->view->setTemplate('AdminDisplay/IliasVectorPointsAdminDisplay.php');
 
-		$baseEndpoint = (string)($this->config->get('base')['endpoint'] ?? '');
-		$endpoint = $this->buildEndpointBase($baseEndpoint);
+		$endpoint = $this->buildEndpointBase();
 
 		$this->view->assign('endpoint', $endpoint);
 		$this->view->assign('collectionKey', self::COLLECTION_KEY);
@@ -275,15 +276,16 @@ final class IliasVectorPointsAdminDisplay implements IAdminDisplay {
 
 	// ---------------------------------------------------------
 
-	private function buildEndpointBase(string $baseEndpoint): string {
-		$baseEndpoint = trim($baseEndpoint);
-
-		if ($baseEndpoint === '') {
-			$baseEndpoint = 'base3.php';
-		}
-
-		$sep = str_contains($baseEndpoint, '?') ? '&' : '?';
-		return $baseEndpoint . $sep . 'name=' . rawurlencode(self::getName()) . '&out=json&action=';
+	private function buildEndpointBase(): string {
+		return $this->linkTargetService->getLink(
+			[
+				'name' => self::getName(),
+				'out' => 'json'
+			],
+			[
+				'action' => ''
+			]
+		);
 	}
 
 	private function normalizeLimit(int $n): int {

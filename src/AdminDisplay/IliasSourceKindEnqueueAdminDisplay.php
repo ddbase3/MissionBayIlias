@@ -6,6 +6,7 @@ use Base3\Api\IClassMap;
 use Base3\Api\IMvcView;
 use Base3\Api\IRequest;
 use Base3\Configuration\Api\IConfiguration;
+use Base3\LinkTarget\Api\ILinkTargetService;
 use Base3\State\Api\IStateStore;
 use MissionBayIlias\Api\IContentProvider;
 use UiFoundation\Api\IAdminDisplay;
@@ -20,7 +21,8 @@ final class IliasSourceKindEnqueueAdminDisplay implements IAdminDisplay {
 		private readonly IMvcView $view,
 		private readonly IRequest $request,
 		private readonly IConfiguration $config,
-		private readonly IStateStore $state
+		private readonly IStateStore $state,
+		private readonly ILinkTargetService $linkTargetService
 	) {}
 
 	public static function getName(): string {
@@ -180,20 +182,15 @@ final class IliasSourceKindEnqueueAdminDisplay implements IAdminDisplay {
 	}
 
 	private function buildEndpointBase(): string {
-		$baseEndpoint = '';
-		try {
-			$baseEndpoint = (string)($this->config->get('base')['endpoint'] ?? '');
-		} catch (\Throwable $e) {
-			$baseEndpoint = '';
-		}
-
-		$baseEndpoint = trim($baseEndpoint);
-		if ($baseEndpoint === '') {
-			$baseEndpoint = 'base3.php';
-		}
-
-		$sep = str_contains($baseEndpoint, '?') ? '&' : '?';
-		return $baseEndpoint . $sep . 'name=' . rawurlencode(self::getName()) . '&out=json&action=';
+		return $this->linkTargetService->getLink(
+			[
+				'name' => self::getName(),
+				'out' => 'json'
+			],
+			[
+				'action' => ''
+			]
+		);
 	}
 
 	private function jsonSuccess(array $data): string {
